@@ -5,7 +5,8 @@
 "use client";
 import { useEffect, useState, type MouseEvent } from "react";
 import type { QueueItem } from "../../server/chief/queue/types"; // type-only
-import { runLine, short, stepWord } from "../../server/chief/deploy/ticket";
+import { runLine, short, stepWord, updateLine, type DeployInfo } from "../../server/chief/deploy/ticket";
+import { pairSentence } from "../lib/chief";
 import { PAIR_TO_DEPLOY, pairHow, startDeploy, stepStates } from "../lib/deploy";
 import { Mark } from "./SideIcons";
 import s from "./DeployPanel.module.css";
@@ -29,6 +30,7 @@ export function DeployPanel({ item, readOnly, userAuth, blocked }: Props) {
   // The run arrived on the ticket (or ended): the button's own state is done.
   useEffect(() => { setBusy(false); if (phase === "running") setError(null); }, [runId, phase]);
   if (!d) return null;
+  if (d.release) return <UpdatePanel item={item} d={d} readOnly={readOnly} userAuth={userAuth} blocked={blocked} />;
 
   const open = item.status === "open" || item.status === "snoozed";
   const running = phase === "running";
@@ -92,6 +94,59 @@ export function DeployPanel({ item, readOnly, userAuth, blocked }: Props) {
         </div>
       )}
       {running && <div className={s.hint}>The console restarts at the end. This page reconnects by itself.</div>}
+      {moved && <div className={s.hint} role="status">The thread moved. Press again.</div>}
+      {error && <div className={s.error} role="alert">{error}</div>}
+    </div>
+  );
+}
+
+// The release variant (server/update): the Update button of a hosted console. One line at the
+// button: the versions, then the press's state (ticket.ts updateLine). No explaining paragraph.
+const ENDED = new Set(["updated", "failed-back", "failed-stuck"]);
+// Every end of a press but "updated": a red dot; the open ones keep the button.
+const BAD = new Set(["failed-back", "failed-stuck", "refused", "not-started", "unreachable", "not-finished"]);
+function UpdatePanel({ item, d, readOnly, userAuth, blocked }: Omit<Props, "item"> & { item: QueueItem; d: DeployInfo }) {
+  const r = d.release!;
+  const u = d.update;
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [moved, setMoved] = useState(false);
+  const state = u?.state;
+  useEffect(() => { setBusy(false); setError(null); }, [state, u?.askedAt]);
+  const open = item.status === "open" || item.status === "snoozed";
+  const going = state === "asked" || state === "running";
+  const go = async (e: MouseEvent): Promise<void> => {
+    if (busy || going) return; // a second press does nothing
+    if (blocked?.(e.detail !== 0)) { setMoved(true); return; }
+    setMoved(false);
+    setBusy(true);
+    setError(null);
+    const res = await startDeploy();
+    if (!res.ok && !(res.status === 409 && /already runs/.test(res.error))) setError(res.error);
+    if (!res.ok) setBusy(false);
+  };
+  const line = updateLine(u);
+  return (
+    <div className={s.box} data-update-state={state ?? "ready"}>
+      {!ENDED.has(state ?? "") && (
+        <div className={s.commits}><span>Version <b>{r.running.version}</b></span><span aria-hidden>→</span><span><b>{r.version}</b></span></div>
+      )}
+      {going && <div className={s.note} role="status">{line}. The console restarts; this page reconnects by itself.</div>}
+      {line && !going && (BAD.has(state ?? "")
+        ? <div className={s.failed} role="alert"><div>{line}</div></div>
+        : <div className={s.done} role="status"><span>{line}</span><button type="button" className={s.btn} onClick={() => window.location.reload()}>Reload this page</button></div>)}
+      {open && !going && (
+        <div className={s.acts}>
+          {readOnly ? (
+            <>
+              <button type="button" className={s.btn} disabled>Pair this device to update</button>
+              <span className={s.hint}>{pairSentence(userAuth, "Update")}</span>
+            </>
+          ) : (
+            <button type="button" className={`${s.btn} ${s.pri}`} disabled={busy} onClick={(e) => void go(e)}>{busy ? "Asking…" : "Update"}</button>
+          )}
+        </div>
+      )}
       {moved && <div className={s.hint} role="status">The thread moved. Press again.</div>}
       {error && <div className={s.error} role="alert">{error}</div>}
     </div>

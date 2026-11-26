@@ -20,6 +20,14 @@ function item(over: Partial<QueueItem> = {}): QueueItem {
     history: [], answerSeq: 0, ...over,
   };
 }
+// The console's own ticket in its release variant (server/update).
+const update = (over: Partial<QueueItem> = {}): QueueItem => item({
+  kind: "deploy", agentId: "console", createdBy: { agentId: "console", kind: "console" }, repo: "choibot", area: "choibot",
+  title: "ChoiBot 849 is ready", body: "#153 feat: one\nVersion 848 → 849", blocking: false, choice: undefined, recommend: undefined,
+  deploy: { live: "a".repeat(40), target: "b".repeat(40), count: 0, prs: [], more: 0,
+    release: { version: 849, commit: "b".repeat(40), builtAt: "2026-11-26T13:00:00Z", security: false, notes: ["#153 feat: one"], more: 0, running: { version: 848, commit: "a".repeat(40) } } },
+  ...over,
+});
 const pr = (over: Partial<QueueItem> = {}) =>
   item({ kind: "pr", choice: undefined, recommend: undefined, pr: { url: "https://github.com/o/r/pull/3", number: 3 }, ...over });
 const buttons = (kb: ReturnType<typeof queueCardKeyboard>) => kb.inline_keyboard.flat();
@@ -283,5 +291,26 @@ describe("cardIdsOf", () => {
   it("is empty without telegram data", () => {
     expect(cardIdsOf(item())).toEqual([]);
     expect(cardIdsOf(item({ telegram: {} }))).toEqual([]);
+  });
+});
+
+describe("the Update ticket on a card (the release variant of the console's own ticket)", () => {
+  const run = { via: "tab" as const, askedAt: NOW, from: 848, to: 849 };
+  it("has an Update button, and none while a press is under way", () => {
+    expect(find(queueCardKeyboard(update(), "https://c.example"), "Update")).toEqual({ text: "Update", callback_data: `q:y:${ID}` });
+    expect(find(queueCardKeyboard(update(), "https://c.example"), "Deploy")).toBeUndefined();
+    const going = update({ deploy: { ...update().deploy!, update: { ...run, state: "running" } } });
+    expect(buttons(queueCardKeyboard(going, "https://c.example"))).toEqual([]);
+  });
+  it("names the versions in its note while it waits for the press", () => {
+    expect(queueCardText(update(), { now: NOW })).toContain("Version 848 → 849");
+  });
+  it("says the state in its note, and how it ended", () => {
+    const failed = update({ status: "withdrawn", lastError: "update-failed", closedAt: NOW, deploy: { ...update().deploy!, update: { ...run, state: "failed-back", step: "health" } } });
+    const text = answeredCardText(failed, { now: NOW });
+    expect(text).toContain("Failed at the health check. Back on version 848. Nothing lost.");
+    expect(text).toContain("× update failed");
+    const done = update({ status: "withdrawn", lastError: "updated", closedAt: NOW, deploy: { ...update().deploy!, update: { ...run, state: "updated" } } });
+    expect(answeredCardText(done, { now: NOW })).toContain("✓ updated");
   });
 });

@@ -2,7 +2,7 @@
 import { renderUnit, unitTemplate } from "./units.js";
 import type { CronJobSpec } from "./cronspec.js";
 
-export type CronUnitVars = { REPO_DIR: string; NODE_BIN: string; PATH: string; CRON_DATA_DIR: string };
+export type CronUnitVars = { REPO_DIR: string; SETTINGS_FILE: string; NODE_BIN: string; PATH: string; CRON_DATA_DIR: string };
 
 export function renderCronUnits(
   repoDir: string, spec: CronJobSpec, vars: CronUnitVars,

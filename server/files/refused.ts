@@ -13,6 +13,7 @@ import { resolveChiefDataDir } from "../chief/paths.js";
 import { resolveCronDataDir } from "../../bin/lib/cronspec.js";
 import { resolveIssuesDataDir } from "../issues/paths.js";
 import { resolveMasterDataDir } from "../master/paths.js";
+import { agentDataDir, servicesDataDir, settingsFile } from "../layout.js";
 
 type Env = Record<string, string | undefined>;
 
@@ -50,8 +51,9 @@ export function refusalFor(o: { env?: Env; checkout?: string } = {}): Refusal {
   const home = env.HOME || homedir();
   const dirs = [
     resolveChiefDataDir(env), resolveCronDataDir(env), resolveIssuesDataDir(env), resolveMasterDataDir(env),
-    // The agent records (hook tokens) and the service records: relative to the checkout (server/index.ts).
-    resolve(checkout, env.AGENT_DATA_DIR ?? ".agent-data"), resolve(checkout, env.SERVICES_DATA_DIR ?? ".services-data"),
+    // The agent records (hook tokens) and the service records, and the settings file: where this
+    // install's layout keeps them (server/layout.ts; in the checkout, or outside it in a release).
+    agentDataDir(env, checkout), servicesDataDir(env, checkout), settingsFile(checkout),
     ...HOME_STORES.map((s) => join(home, s)),
     ...CONFIG_DIR_KEYS.map((k) => env[k]?.trim() ?? "").filter((d) => isAbsolute(d)),
   ];

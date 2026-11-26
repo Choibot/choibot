@@ -1,6 +1,6 @@
 // src/lib/version.test.ts — Settings, "Version": the status line and the read of GET /api/version.
 import { describe, expect, it } from "vitest";
-import { fetchVersion, versionName, versionStatus, type VersionInfo } from "./version";
+import { fetchUpdateView, fetchVersion, updateWords, versionName, versionStatus, type VersionInfo, type UpdateView } from "./version";
 
 const COMMIT = "33c531a" + "0".repeat(33);
 const base: VersionInfo = { kind: "checkout", version: null, commit: COMMIT, buildId: COMMIT, channel: null, builtAt: null };
@@ -28,5 +28,27 @@ describe("version words", () => {
     expect(await fetchVersion({ fetch: answer(401, { error: "unauthorized" }) })).toEqual({ error: "the console answered HTTP 401" });
     expect(await fetchVersion({ fetch: answer(200, { nope: 1 }) })).toEqual({ error: "the answer is not a version" });
     expect(await fetchVersion({ fetch: async () => { throw new Error("down"); } })).toEqual({ error: "the console did not answer" });
+  });
+});
+
+describe("the update line of Settings (a hosted console)", () => {
+  const NOW = Date.parse("2026-11-26T16:00:00Z");
+  const view = (o: Partial<UpdateView>): UpdateView => ({ on: true, running: 848, checkedAt: null, result: null, tried: null, installed: null, step: null, ...o });
+  it("says the version and when root last checked; nothing where there is no updater", () => {
+    expect(updateWords(null, NOW)).toBeNull();
+    expect(updateWords(view({ on: false }), NOW)).toBeNull();
+    expect(updateWords(view({}), NOW)).toBe("Version 848, not checked yet");
+    expect(updateWords(view({ checkedAt: "2026-11-26T14:00:00Z", result: "current" }), NOW)).toBe("Version 848, checked 2 h ago");
+    expect(updateWords(view({ checkedAt: "2026-11-26T14:00:00Z", result: "unreachable" }), NOW)).toBe("Version 848, checked 2 h ago");
+  });
+  it("says how an update ended; 'back on' only when the way back passed", () => {
+    expect(updateWords(view({ result: "failed-back", tried: 849, installed: 848 }), NOW)).toBe("Update to 849 failed. Back on 848.");
+    expect(updateWords(view({ result: "failed-stuck", tried: 849, installed: 848 }), NOW)).toBe("Update to 849 failed. The console needs help.");
+  });
+  it("reads the view from GET /api/deploy, and nothing from a git console's answer", async () => {
+    const answer = (body: unknown) => async () => new Response(JSON.stringify(body), { status: 200 });
+    expect(await fetchUpdateView({ fetch: answer({ armed: true, update: view({}) }) })).toEqual(view({}));
+    expect(await fetchUpdateView({ fetch: answer({ armed: true, unit: "choibot.service" }) })).toBeNull();
+    expect(await fetchUpdateView({ fetch: async () => { throw new Error("down"); } })).toBeNull();
   });
 });

@@ -135,8 +135,10 @@ else
   say "✖ GET /api/version answered $VCODE: $VBODY"
   VFAIL=1
 fi
-if grep -q '\[deploy\] off: this console runs a release' "$ROOT/server.log"; then say "✔ the log: [deploy] off: this console runs a release"
-else say "  (no [deploy] line in the log: $(grep -c '\[deploy\]' "$ROOT/server.log") deploy lines)"; fi
+# A release install has no Deploy: the Update ticket of root's updater (server/update) in its place.
+if grep -q '\[update\] the Update ticket' "$ROOT/server.log"; then say "✔ the log: [update] the Update ticket (no Deploy on a release)"
+elif grep -q '\[deploy\] off: this console runs a release' "$ROOT/server.log"; then say "✔ the log: [deploy] off: this console runs a release"
+else say "  (no [update] or [deploy] line in the log)"; fi
 
 if [ "$TRACE" = 1 ]; then
   say "→ what the console ran (execve, by program):"

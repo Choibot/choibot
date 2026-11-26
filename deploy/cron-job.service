@@ -7,7 +7,7 @@ Description=ChoiBot cron job {{JOB_NAME}}
 [Service]
 Type=oneshot
 WorkingDirectory={{REPO_DIR}}
-EnvironmentFile={{REPO_DIR}}/.env
+EnvironmentFile={{SETTINGS_FILE}}
 Environment=PATH={{PATH}}
 Environment=CRON_DATA_DIR={{CRON_DATA_DIR}}
 ExecStart={{NODE_BIN}} {{REPO_DIR}}/bin/cron-runner.mjs {{JOB_NAME}}

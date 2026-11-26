@@ -5,6 +5,7 @@
 #   scripts/release/build.sh --ref <commit> --out <new or empty folder>
 #                            [--repo <choibot checkout>] [--notes-from <commit>]
 #                            [--unmerged] [--keep]
+#                            [--expires-days <n> --notes-file <file> --scan <export tool>]
 #   scripts/release/build.sh --ref <commit> --print-version [--repo <checkout>] [--unmerged]
 #
 # It writes two files into --out: choibot-<version>-<commit12>-linux-x64.tar.gz and index.json.
@@ -15,6 +16,16 @@
 #   --unmerged    a proof of a commit that is not on main: channel "proof" (the updater installs
 #                 only its own channel), and its number may be the number of a later main commit.
 #   --keep        keep the work folder (it is printed).
+#   --expires-days  a PUBLISHED release: it ends n days after its build (index.json `expires`; the
+#                 updater refuses to download an index with no end). The format's rule: 90 days,
+#                 and a new release at least every 60 days. It needs --notes-file and --scan, and a
+#                 commit of main. Without it `expires` is null: a local release.
+#   --notes-file  the notes, written for a person (release.mjs checkNotes: 1 to 5 lines, at most
+#                 200 characters each, no "#<number>", no commit subject). With it the commit
+#                 subjects are not used.
+#   --scan        the public export's tool of the private repo (its scan-text): the notes get the
+#                 hard checks of the public tree, with the private words of this machine. So a
+#                 published release is cut on the machine that holds those words.
 #   --print-version  only the version that the commit gets, and its commit, on one line
 #                 ("842 <commit>"); nothing is built (git, and node for a public tree, only).
 #
@@ -41,7 +52,7 @@ START=$SECONDS
 step() { printf '\n→ %s (%ss)\n' "$*" "$((SECONDS - START))"; }
 
 HERE=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-REF= OUT= REPO= NOTES_FROM= UNMERGED=0 KEEP=0 PRINT=0
+REF= OUT= REPO= NOTES_FROM= UNMERGED=0 KEEP=0 PRINT=0 EXPIRES_DAYS= NOTES_FILE= SCAN=
 while [ $# -gt 0 ]; do
   case $1 in
     --ref) REF=${2:?--ref <commit>}; shift 2 ;;
@@ -51,6 +62,9 @@ while [ $# -gt 0 ]; do
     --unmerged) UNMERGED=1; shift ;;
     --keep) KEEP=1; shift ;;
     --print-version) PRINT=1; shift ;;
+    --expires-days) EXPIRES_DAYS=${2:?--expires-days <n>}; shift 2 ;;
+    --notes-file) NOTES_FILE=${2:?--notes-file <file>}; shift 2 ;;
+    --scan) SCAN=${2:?--scan <export tool>}; shift 2 ;;
     *) die "unknown argument: $1 (see the head of $0)" ;;
   esac
 done
@@ -60,6 +74,27 @@ REPO=${REPO:-$(git -C "$HERE" rev-parse --show-toplevel)}
 # --print-version: its one line goes to the first output; every other line to the second.
 exec 3>&1
 [ "$PRINT" = 0 ] || exec 1>&2
+
+# A published release, checked before anything is built: its end, its notes for a person, and
+# their scan with the private words (a published release never carries raw commit subjects).
+if [ -n "$EXPIRES_DAYS" ]; then
+  [ -n "$NOTES_FILE" ] || die "a published release (--expires-days) needs --notes-file: it never carries raw commit subjects"
+  [ -n "$SCAN" ] || die "a published release (--expires-days) needs --scan <the export tool>: its notes must pass the public tree's checks"
+  [ "$UNMERGED" = 0 ] || die "a published release is a commit of main: not with --unmerged"
+  [[ $EXPIRES_DAYS =~ ^[0-9]{1,3}$ ]] && [ "$EXPIRES_DAYS" -ge 1 ] && [ "$EXPIRES_DAYS" -le 400 ] || die "--expires-days is not a whole number from 1 to 400"
+fi
+[ -z "$NOTES_FILE" ] || [ -z "$NOTES_FROM" ] || die "give --notes-file or --notes-from, not both"
+if [ -n "$NOTES_FILE" ] && [ "$PRINT" = 0 ]; then
+  [ -f "$NOTES_FILE" ] || die "--notes-file $NOTES_FILE is not a file"
+  command -v node > /dev/null || die "node is needed to check the notes"
+  NOTES_LINES=$(node "$HERE/release.mjs" notes "$NOTES_FILE") || die "the notes are refused (the line above says why)"
+  if [ -n "$SCAN" ]; then
+    [ -f "$SCAN" ] || die "--scan $SCAN is not a file"
+    node "$SCAN" scan-text --file "$NOTES_FILE" || die "the notes fail the public tree's checks (above): change them"
+  else
+    say "  the notes are not scanned (no --scan): a local release only"
+  fi
+fi
 
 # ------------------------------------------------------------------ the machine and the commit
 
@@ -197,21 +232,25 @@ SUDOERS=$WORK/sudoers.txt
 (cd "$STAGE/app" && "${B[@]}" node_modules/.bin/tsx -e \
   'import { STRONG_DEFAULTS, sudoersText } from "./bin/lib/strong.ts"; process.stdout.write(sudoersText("choibot", STRONG_DEFAULTS));' > "$SUDOERS") \
   || die "the sudoers text of strong-setup could not be rendered"
-if [ -n "$NOTES_FROM" ]; then
+if [ -n "$NOTES_FILE" ]; then
+  printf '%s\n' "$NOTES_LINES" > "$WORK/notes.txt"
+elif [ -n "$NOTES_FROM" ]; then
   FROM=$(git -C "$REPO" rev-parse --verify --quiet "$NOTES_FROM^{commit}") || die "--notes-from $NOTES_FROM is not a commit"
   git -C "$REPO" log --first-parent --format=%s "$FROM..$COMMIT" > "$WORK/notes.txt"
 else
   git -C "$REPO" log --first-parent --format=%s -n 20 "$COMMIT" > "$WORK/notes.txt"
 fi
 BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+EXPIRES=
+[ -z "$EXPIRES_DAYS" ] || EXPIRES=$("$STAGE/node/bin/node" "$HERE/release.mjs" expires "$BUILT_AT" "$EXPIRES_DAYS") || die "the end time could not be made"
 FACTS=$WORK/facts.json
 "$STAGE/node/bin/node" -e '
   const [facts, notes, sudoers, ...v] = process.argv.slice(1);
   const fs = require("node:fs");
-  const [version, commit, channel, builtAt, node, pnpm, gh, file] = v;
-  fs.writeFileSync(facts, JSON.stringify({ version: Number(version), commit, channel, builtAt, node, pnpm, gh, file,
+  const [version, commit, channel, builtAt, node, pnpm, gh, file, expires] = v;
+  fs.writeFileSync(facts, JSON.stringify({ version: Number(version), commit, channel, builtAt, node, pnpm, gh, file, expires: expires || null,
     notes: fs.readFileSync(notes, "utf8").split("\n").filter((l) => l.trim() !== ""), sudoers: fs.readFileSync(sudoers, "utf8") }));
-' "$FACTS" "$WORK/notes.txt" "$SUDOERS" "$VERSION" "$COMMIT" "$CHANNEL" "$BUILT_AT" "$NODE_VERSION" "$PNPM_VERSION" "$GH_VERSION" "$NAME"
+' "$FACTS" "$WORK/notes.txt" "$SUDOERS" "$VERSION" "$COMMIT" "$CHANNEL" "$BUILT_AT" "$NODE_VERSION" "$PNPM_VERSION" "$GH_VERSION" "$NAME" "$EXPIRES"
 "$STAGE/node/bin/node" "$HERE/release.mjs" release-json "$STAGE" "$FACTS"
 # Modes: folders 0755, files 0644 or 0755, no setuid, setgid or sticky bit.
 chmod -R u+rwX,go+rX,go-w,ug-s,-t "$STAGE"
@@ -249,3 +288,4 @@ say "✔ The release is ready: $OUT"
 say "  $NAME: $SIZE bytes ($((SIZE / 1048576)) MiB), sha256 $(sha256sum "$OUT/$NAME" | cut -d' ' -f1)"
 say "  $ENTRIES entries, $EXTRACTED bytes ($((EXTRACTED / 1048576)) MiB) extracted"
 say "  version $VERSION, commit $COMMIT, channel $CHANNEL; $((SECONDS - START)) s"
+if [ -n "$EXPIRES" ]; then say "  a release to publish: it ends $EXPIRES"; else say "  a local release: no end time (the updater does not download it)"; fi

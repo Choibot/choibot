@@ -3,7 +3,7 @@
 // Telegram call, no store access. All text is plain (no parse_mode).
 import { clip, TG_TEXT_MAX, type InlineButton, type InlineKeyboard } from "../../issues/telegram.js";
 import { isPersistentAgentId } from "../kinds.js";
-import { CONSOLE_AGENT_ID, DEPLOY_CLOSED, isRunning, runLine } from "../deploy/ticket.js";
+import { CONSOLE_AGENT_ID, DEPLOY_CLOSED, isRunning, ticketLine, updateVersions } from "../deploy/ticket.js";
 import { COORDINATOR_ID } from "../../coordinator/paths.js";
 import { hasImages, type QueueItem } from "./types.js";
 
@@ -62,7 +62,9 @@ function deployNote(item: QueueItem): string {
   if (item.kind !== "deploy" || !d) return "";
   const run = d.run;
   const tail = run?.phase === "failed" && run.tail ? `…${run.tail.slice(-DEPLOY_TAIL_MAX)}` : "";
-  return [run?.phase === "running" ? "" : d.note ?? "", runLine(run), tail].filter(Boolean).join("\n");
+  // The release variant: the versions while it waits for the press, then the press's line.
+  const versions = d.release && !d.update ? updateVersions(d.release) : "";
+  return [run?.phase === "running" ? "" : d.note ?? "", versions, ticketLine(d), tail].filter(Boolean).join("\n");
 }
 
 function parts(item: QueueItem, o: TextOpts): Parts {
@@ -117,7 +119,10 @@ export function answeredCardText(item: QueueItem, o: TextOpts & { tz?: string })
   if (item.kind === "deploy" && item.status === "withdrawn") {
     // The run line (in the note) is the result of a deployed ticket.
     if (item.lastError === DEPLOY_CLOSED.deployed) return assemble(p, "\n✓ deployed");
-    if (item.lastError === DEPLOY_CLOSED.live) return assemble({ ...p, note: "" }, "\nclosed: the running build has all of main");
+    if (item.lastError === DEPLOY_CLOSED.live) return assemble({ ...p, note: "" }, `\nclosed: ${item.deploy?.release ? "this console runs the newest version" : "the running build has all of main"}`);
+    // An update's end: its line is in the note.
+    if (item.lastError === DEPLOY_CLOSED.updated) return assemble(p, "\n✓ updated");
+    if (item.lastError === DEPLOY_CLOSED.updateFailed) return assemble(p, "\n× update failed");
   }
   if (item.status === "withdrawn") return assemble(p, `\n${item.lastError ? flat(item.lastError) : "withdrawn"}`);
   const a = item.answer;
@@ -167,7 +172,7 @@ export function queueCardKeyboard(item: QueueItem, consoleUrl: string): InlineKe
     case "deploy":
       // A run that goes shows no button: a second press does nothing (spec §5.7).
       if (isRunning(item.deploy)) return { inline_keyboard: [] };
-      rows.push([cb("Deploy", `q:y:${id}`)]);
+      rows.push([cb(item.deploy?.release ? "Update" : "Deploy", `q:y:${id}`)]);
       break;
   }
   rows.push([cb("Snooze 1h", `q:s:${id}`)]);

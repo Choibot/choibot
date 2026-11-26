@@ -18,7 +18,8 @@
 #   run.sh snapshot                           the real user's units and data dirs, to compare
 #                                             before and after a test (read only)
 #
-# KEY=value for `install`: CHOIBOT_SOURCE (default: a git copy of this checkout, <root>/src),
+# KEY=value for `install`: CHOIBOT_SOURCE (default: a git copy of this checkout, <root>/src; none
+# with CHOIBOT_RELEASE), CHOIBOT_RELEASE and CHOIBOT_RELEASE_INDEX (a release file and its index),
 # CHOIBOT_PORT (default 4310), CHOIBOT_HOME, TTY=0 (no terminal: a pipe), ENTER=1 (the
 # person presses Enter one time), and ANSWER='<text>=><keys>' (the person types <keys> and
 # Enter when <text> shows; give it more than one time for more questions: person.py).
@@ -105,7 +106,8 @@ cmd_install() {
       *) die "install: unknown argument '$kv'" ;;
     esac
   done
-  [[ " ${vars[*]-} " == *" CHOIBOT_SOURCE="* ]] || vars+=("CHOIBOT_SOURCE=$ROOT/src")
+  # A release install (CHOIBOT_RELEASE) takes no source.
+  [[ " ${vars[*]-} " == *" CHOIBOT_SOURCE="* || " ${vars[*]-} " == *" CHOIBOT_RELEASE="* ]] || vars+=("CHOIBOT_SOURCE=$ROOT/src")
   [[ " ${vars[*]-} " == *" CHOIBOT_PORT="* ]] || vars+=("CHOIBOT_PORT=4310")
   cp "$REPO/install.sh" "$ROOT/install.sh"
   if [ ${#answers[@]} -gt 0 ]; then

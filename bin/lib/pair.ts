@@ -12,6 +12,7 @@ import { names } from "../../server/names.mjs";
 import { cli } from "../../server/setup/steps.js";
 import { humanShell } from "./client.js";
 import { parseEnv } from "./env.js";
+import { settingsFile } from "../../server/layout.js";
 
 // How this console pairs a device, from its settings and its device list.
 //   code      a new install with no paired device: the code of the box
@@ -31,7 +32,7 @@ export async function pairWay(env: Env, n: { legacy: boolean } = names()): Promi
 
 // The settings of the install in `repoDir`: its file, under the env of this shell.
 export function installEnv(repoDir: string, env: Env = process.env): Env {
-  const path = join(repoDir, ".env");
+  const path = settingsFile(repoDir);
   return { ...env, ...(existsSync(path) ? Object.fromEntries(parseEnv(readFileSync(path, "utf8"))) : {}) };
 }
 

@@ -7,7 +7,7 @@
 // All item text is untrusted: callers render it as plain text.
 import type { QueueItem } from "../../server/chief/queue/types"; // type-only
 import { sortOpen } from "../../server/chief/queue/priority";
-import { CONSOLE_AGENT_ID, DEPLOY_CLOSED, runLine } from "../../server/chief/deploy/ticket";
+import { CONSOLE_AGENT_ID, DEPLOY_CLOSED, runLine, updateLine } from "../../server/chief/deploy/ticket";
 import { toBlocks, type Block, type Shown } from "./thread";
 
 export type TicketPhase = "open" | "snoozed" | "answered" | "withdrawn";
@@ -78,14 +78,16 @@ export function threadRows(items: Shown[], tickets: QueueItem[], now: number, un
 }
 
 const KIND_WORD: Record<QueueItem["kind"], string> = { pr: "PR", preview: "Preview", choice: "Choice", question: "Question", deploy: "Deploy" };
-export const kindWord = (i: QueueItem): string => KIND_WORD[i.kind] ?? i.kind;
+// The release variant of the console's own ticket (server/update) is an Update.
+export const kindWord = (i: QueueItem): string => (i.kind === "deploy" && i.deploy?.release ? "Update" : KIND_WORD[i.kind] ?? i.kind);
 
 // The words of a closed ticket's line. An item closed with no answer says why.
 export function closedText(i: QueueItem): string {
   if (i.status === "withdrawn") {
     if (i.kind === "deploy") {
       if (i.lastError === DEPLOY_CLOSED.deployed) return runLine(i.deploy?.run) || "Deployed";
-      if (i.lastError === DEPLOY_CLOSED.live) return "Closed: the running build has all of main";
+      if (i.lastError === DEPLOY_CLOSED.live) return i.deploy?.release ? "Closed: this console runs the newest version" : "Closed: the running build has all of main";
+      if (i.lastError === DEPLOY_CLOSED.updated || i.lastError === DEPLOY_CLOSED.updateFailed) return updateLine(i.deploy?.update) || "Update ended";
       return "Dismissed";
     }
     if (i.lastError === "merged") return "PR merged";
@@ -115,7 +117,7 @@ export function closedText(i: QueueItem): string {
 // The mark of a closed ticket: ✓ for an answer and for a deploy that was done, × for any other
 // close with no answer (withdrawn, PR closed, agent gone).
 export const closedMark = (i: QueueItem): "✓" | "×" =>
-  (i.status !== "withdrawn" || (i.kind === "deploy" && i.lastError === DEPLOY_CLOSED.deployed) ? "✓" : "×");
+  (i.status !== "withdrawn" || (i.kind === "deploy" && (i.lastError === DEPLOY_CLOSED.deployed || i.lastError === DEPLOY_CLOSED.updated)) ? "✓" : "×");
 
 // When the ticket closed: the answer's time, else the close time.
 export const closedAt = (i: QueueItem): number => (i.status !== "withdrawn" && i.answer ? i.answer.at : i.closedAt ?? i.updatedAt);

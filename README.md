@@ -232,10 +232,13 @@ What you can give to the script:
 | Variable | Meaning | Default |
 | --- | --- | --- |
 | `CHOIBOT_SOURCE` | A git address, or a `.tar.gz` file on the server. | None until the public release. |
+| `CHOIBOT_RELEASE` | A release file that we built (`scripts/release/build.sh`): the full path of its `.tar.gz` on the server. It holds the code, its packages, its build, its Node and gh, so the server downloads and builds nothing. Ubuntu 24.04 on x86-64, into a new folder only. Not with `CHOIBOT_SOURCE`. | None. |
+| `CHOIBOT_RELEASE_INDEX` | The release's `index.json`: the file's name, size and SHA-256 are checked against it before anything is unpacked. | None. |
 | `CHOIBOT_HOME` | ChoiBot's own folder. | `~/choibot` |
 | `CHOIBOT_PORT` | Where the search for a free port starts. | `3100` |
 
 An install from an archive file has no git history: `choibot update` cannot get new code for it.
+An install from a release gets a new release the same way (a hosted console: its Update ticket).
 
 `scripts/install-test/run.sh` runs the script for real in a throwaway folder, with fakes for
 `systemctl`, `sudo`, `tailscale` and the Claude login.

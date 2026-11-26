@@ -2,6 +2,7 @@
 // Agent ids and widget ids become path segments, so both are checked against
 // a strict pattern before any filesystem call: no dots, no separators.
 import { join, resolve } from "node:path";
+import { widgetsDataDir } from "../layout.js";
 
 // The agent id pattern lives in server/ids.ts; re-exported for old importers.
 export { isAgentId } from "../ids.js";
@@ -12,11 +13,12 @@ export function isWidgetId(v: unknown): v is string {
   return typeof v === "string" && WIDGET_ID_RE.test(v);
 }
 
-// WIDGETS_DATA_DIR (default `.widgets-data` in the console's cwd), always
-// absolute: the path goes into agent prompts and script env, where a relative
-// path would resolve against the agent's cwd instead.
+// WIDGETS_DATA_DIR, else the folder of this install's layout (server/layout.ts: `.widgets-data` in
+// the console's cwd, or <install home>/widgets in the release layout), always absolute: the path
+// goes into agent prompts and script env, where a relative path would resolve against the agent's
+// cwd instead.
 export function resolveWidgetsDataDir(env: Record<string, string | undefined> = process.env): string {
-  return resolve(env.WIDGETS_DATA_DIR?.trim() || ".widgets-data");
+  return widgetsDataDir(env, process.cwd());
 }
 
 export function agentWidgetsDir(root: string, agentId: string): string {

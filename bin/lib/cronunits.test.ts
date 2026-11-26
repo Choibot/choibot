@@ -12,7 +12,7 @@ const spec = {
   notify: "always", enabled: true, createdAt: 1,
 } as CronJobSpec;
 const vars: CronUnitVars = {
-  REPO_DIR: REPO, NODE_BIN: "/nvm/node", PATH: "/nvm:/bin", CRON_DATA_DIR: "/data/cron",
+  REPO_DIR: REPO, SETTINGS_FILE: `${REPO}/.env`, NODE_BIN: "/nvm/node", PATH: "/nvm:/bin", CRON_DATA_DIR: "/data/cron",
 };
 
 describe("renderCronUnits", () => {

@@ -586,12 +586,12 @@ export function QueueView({ q, onOpenAgent, onExit }: { q: UseQueue; onOpenAgent
       <div className={s.listScroll}>
         {!d.hardened && <div className={s.listChip}><span className={s.chip} title="Your agents and the console run under the same account on your server. Settings, Devices says what that means.">protection: basic</span></div>}
         {deployed && (
-          <div className={s.section} role="group" aria-label="Deployed">
-            <div className={s.grp}>Deployed</div>
+          <div className={s.section} role="group" aria-label={deployed.deploy?.release ? "Update" : "Deployed"}>
+            <div className={s.grp}>{deployed.deploy?.release ? "Update" : "Deployed"}</div>
             <div className={s.row} data-done="" {...peekRow(deployed)}>
-              <span className={s.mark}><span className={s.tick} aria-hidden><Mark kind="ok" /></span></span>
-              <div className={s.rowT}><b title={closedText(deployed)}>{closedText(deployed)}</b></div>
-              <div className={s.rowB}><span className={s.rowM}>{clockText(closedAt(deployed), now)} · reload the page to get the new build</span></div>
+              <span className={s.mark}><span className={s.tick} aria-hidden><Mark kind={closedMark(deployed) === "✓" ? "ok" : "fail"} /></span></span>
+              <div className={s.rowT}><b className={s.whole}>{closedText(deployed)}</b></div>
+              <div className={s.rowB}><span className={s.rowM}>{clockText(closedAt(deployed), now)}{closedMark(deployed) === "✓" ? " · reload the page to get the new build" : ""}</span></div>
             </div>
           </div>
         )}

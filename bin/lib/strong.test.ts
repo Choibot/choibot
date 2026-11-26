@@ -377,7 +377,8 @@ describe("the run, with a fake exec", () => {
         return { code: 1, out: "no such user" };
       }
       if (argv[0] === "getent" || (argv[0] === "sh" && argv[2]?.startsWith("command -v"))) return { code: 1, out: "" };
-      if (argv[0] === "cat" && x.as && argv[2] === join(dir, ".env")) return { code: 0, out: readFileSync(argv[2], "utf8") };
+      // The user reads its settings file: at most SETTINGS_MAX bytes, within 30 s.
+      if (argv[0] === "timeout" && argv[4] === "head" && x.as && argv.at(-1) === join(dir, ".env")) return { code: 0, out: readFileSync(join(dir, ".env"), "utf8") };
       if (argv[0] === "sh" && argv[2]?.startsWith("umask 077") && x.as) { writeFileSync(argv[4], x.input ?? ""); return { code: 0, out: "" }; }
       return { code: 0, out: "" };
     };
@@ -398,7 +399,7 @@ describe("the run, with a fake exec", () => {
     // The marks in the helper's config are the uids now.
     expect(Object.fromEntries(parseEnv(written["/etc/choibot-agent-exec.conf.tmp-strong"]))).toMatchObject({ AGENT_UID: "1001", CHIEF_UID: "1002", CHIEF_DTACH_DIR: "/run/choibot-dtach-chief" });
     expect(Object.values(written).join("")).not.toContain("<uid of");
-    expect(calls).toContain(`[choibot] cat -- ${join(dir, ".env")}`);
+    expect(calls).toContain(`[choibot] timeout -s KILL 30 head -c ${256 * 1024 + 1} -- ${join(dir, ".env")}`);
     expect(calls.some((c) => c.startsWith(`[choibot] sh -c umask 077 && cat > "$1.strong-new"`))).toBe(true);
     const at = (s: string) => calls.indexOf(s);
     expect(at("visudo -cf /etc/sudoers.d/choibot-agent-exec.tmp-strong")).toBeGreaterThan(-1);

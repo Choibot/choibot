@@ -1,7 +1,9 @@
 // src/lib/version.ts — Settings, "Version": which version this console runs (GET /api/version,
 // server/release.ts), in plain words. The status line and the rows are pure, for the tests.
 import type { VersionInfo } from "../../server/release"; // type-only: release.ts imports node:fs
+import type { UpdateService } from "../../server/update/service"; // type-only
 import { chiefFetch } from "./chief";
+import { ageText } from "./queueInbox";
 import type { SectionStatus } from "./settings";
 
 export type { VersionInfo };
@@ -48,6 +50,29 @@ export const NEW_CODE_WORDS: Record<VersionInfo["kind"], string> = {
   release: "This console does not get a new release by itself yet.",
   archive: "This console does not get new code by itself yet.",
 };
+
+// The updater of a hosted server (server/update): GET /api/deploy says what it last did.
+export type UpdateView = ReturnType<UpdateService["view"]>;
+
+export async function fetchUpdateView(deps: { fetch?: typeof fetch } = {}): Promise<UpdateView | null> {
+  try {
+    const res = await chiefFetch("/api/deploy", undefined, deps);
+    if (!res.ok) return null;
+    const b = (await res.json().catch(() => null)) as { update?: UpdateView } | null;
+    return b?.update && typeof b.update.on === "boolean" ? b.update : null;
+  } catch {
+    return null;
+  }
+}
+
+// One line: "Version 848, checked 2 h ago", or the end of a failed update. null: no updater here.
+export function updateWords(u: UpdateView | null, now: number): string | null {
+  if (!u?.on) return null;
+  if (u.result === "failed-back" && u.tried !== null && u.installed !== null) return `Update to ${u.tried} failed. Back on ${u.installed}.`;
+  if (u.result === "failed-stuck" && u.tried !== null) return `Update to ${u.tried} failed. The console needs help.`;
+  const at = u.checkedAt ? Date.parse(u.checkedAt) : NaN;
+  return Number.isFinite(at) ? `Version ${u.running}, checked ${ageText(now - at)} ago` : `Version ${u.running}, not checked yet`;
+}
 
 // The date and time of a release's build, in the browser's own words; "" when it is not one.
 export function builtWords(iso: string | null): string {

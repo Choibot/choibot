@@ -9,6 +9,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import type { FastifyInstance } from "fastify";
 import { z } from "zod";
+import { listenerKind } from "./frontproxy.js";
 
 export const RELEASE_FILE = "release.json";
 // Open also while a new install waits for its first device (chief/firstrun.ts): the updater's check
@@ -92,4 +93,19 @@ export function versionInfo(dir: string): VersionInfo {
 // build and the release of a running server do not change on disk while it runs.
 export function registerVersionApi(app: FastifyInstance, info: VersionInfo): void {
   app.get(VERSION_ROUTE, async () => info);
+}
+
+// The version for the door (the front proxy, server/frontproxy.ts): on EVERY answer of the private
+// listener, also a refusal, so the door's health check (HEAD / with its token) reads it. Never on
+// loopback or another peer: the door is its only reader, and it must not pass it on to a browser.
+// "<version> <commit>": 0 for an install that is not a release, "-" for no recorded commit.
+export const VERSION_HEADER = "x-choibot-version";
+export const versionHeaderValue = (info: Pick<VersionInfo, "version" | "commit">): string => `${info.version ?? 0} ${info.commit ?? "-"}`;
+
+export function registerVersionHeader(app: FastifyInstance, info: Pick<VersionInfo, "version" | "commit">): void {
+  const value = versionHeaderValue(info);
+  app.addHook("onSend", async (req, reply, payload) => {
+    if (listenerKind(req) === "proxy") reply.header(VERSION_HEADER, value);
+    return payload;
+  });
 }

@@ -27,7 +27,8 @@
 # CHIEF_TEST_ENV_FILE=<root>/<file> (the .env the Settings form writes and the server reads), and
 # for the front proxy's route walk (scripts/proxy-walk.mts) CONSOLE_PROXY_FROM, _NETWORK, _PORT,
 # _TOKEN_SHA256, _TLS_DIR (inside <root>), CONSOLE_PROXY_TEST_ADDRESS and CONSOLE_ROUTE_DUMP
-# (inside <root>), and GITHUB_APP_LOGIN, GITHUB_APP_CLIENT_ID and GITHUB_APP_URL (the ChoiBot
+# (inside <root>), CONSOLE_UPDATE_TEST_DIR (inside <root>: the fake status files of the Update
+# ticket, server/update), and GITHUB_APP_LOGIN, GITHUB_APP_CLIENT_ID and GITHUB_APP_URL (the ChoiBot
 # GitHub app: public values only).
 # Phase 2c: with CHIEF_AGENT_UID the server probes its agent exec helper
 # through AGENT_SUDO_BIN at boot. The instance never runs the real sudo
@@ -316,7 +317,7 @@ render_env() {
     for k in CONSOLE_PROXY_FROM CONSOLE_PROXY_NETWORK CONSOLE_PROXY_PORT CONSOLE_PROXY_TOKEN_SHA256 CONSOLE_PROXY_TEST_ADDRESS; do
       if [ -n "${!k:-}" ]; then put "$k" "${!k}"; fi
     done
-    for k in CONSOLE_PROXY_TLS_DIR CONSOLE_ROUTE_DUMP; do
+    for k in CONSOLE_PROXY_TLS_DIR CONSOLE_ROUTE_DUMP CONSOLE_UPDATE_TEST_DIR; do
       if [ -n "${!k:-}" ]; then
         case "${!k}" in "$ROOT"/*) ;; *) die "refusing $k '${!k}': it must be inside $ROOT" ;; esac
         put "$k" "${!k}"

@@ -7,8 +7,12 @@
 //   node release.mjs release-json <stage> <facts.json>     write <stage>/app/release.json
 //   node release.mjs index <out> <facts.json> <stage>      write <out>/index.json (and check it)
 //   node release.mjs source <file> [<first parent's file>]  a public tree's version: "<version> <source commit>"
+//   node release.mjs installable <stage> <node> <pnpm> <gh>   install.sh's check of an extracted release:
+//                                                          "<version> <commit> <channel>"
+//   node release.mjs notes <file>                          the notes of a published release, checked
+//   node release.mjs expires <builtAt> <days>              the end time of a published release
 //
-// facts.json: {version, commit, channel, builtAt, node, pnpm, gh, file?, notes?, sudoers?}, made by
+// facts.json: {version, commit, channel, builtAt, node, pnpm, gh, file?, notes?, sudoers?, expires?}, made by
 // build.sh. Every value is checked here again: a wrong one stops the build.
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, readdirSync, readlinkSync, renameSync, writeFileSync } from "node:fs";
@@ -24,6 +28,12 @@ const TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
 export const NOTES_MAX = 30;
 export const NOTE_CHARS = 200;
 export const INDEX_MAX = 64 * 1024;
+// A published release (format section 9): its notes are written for a person, at most NOTES_SHOWN
+// lines; it ends `expires` after its build, at most EXPIRES_DAYS_MAX days (the updater refuses a
+// download of an index with no end).
+export const NOTES_SHOWN = 5;
+export const EXPIRES_DAYS_MAX = 400;
+const DAY_MS = 86_400_000;
 
 // The root files a release ships (format section 4): `from` is the file in the tar that root
 // installs as a byte copy; null is a text that strong-setup renders (build.sh gives it).
@@ -127,7 +137,52 @@ export function checkFacts(f, need = []) {
   if (need.includes("sudoers") && (typeof f.sudoers !== "string" || !f.sudoers.includes("choibot-agent-exec"))) fail("sudoers is not the text of the sudoers file");
   const notes = f.notes ?? [];
   if (!Array.isArray(notes) || notes.some((n) => typeof n !== "string")) fail("notes is not a list of texts");
+  const why = expiresRefusal(f.expires ?? null, f.builtAt);
+  if (why) fail(why);
   return f;
+}
+
+// expires: null (a local release), or a UTC time in seconds after builtAt, at most
+// EXPIRES_DAYS_MAX days after it. Why not, or null.
+export function expiresRefusal(expires, builtAt) {
+  if (expires === null) return null;
+  // A real calendar time: the updater reads it with strptime, which refuses 2027-02-30.
+  if (typeof expires !== "string" || !TIME.test(expires) || Number.isNaN(Date.parse(expires)) || new Date(Date.parse(expires)).toISOString().replace(/\.\d{3}Z$/, "Z") !== expires) {
+    return "expires is not null or a UTC time in seconds";
+  }
+  const span = Date.parse(expires) - Date.parse(builtAt);
+  if (!(span > 0)) return "expires is not after builtAt";
+  if (span > EXPIRES_DAYS_MAX * DAY_MS) return `expires is more than ${EXPIRES_DAYS_MAX} days after builtAt`;
+  return null;
+}
+
+// The end time of a published release: builtAt + `days` whole days, in the index's time form.
+export function expiresAt(builtAt, days) {
+  if (typeof builtAt !== "string" || !TIME.test(builtAt)) fail("builtAt is not a UTC time in seconds");
+  if (!/^[0-9]{1,3}$/.test(String(days)) || Number(days) < 1 || Number(days) > EXPIRES_DAYS_MAX) fail(`--expires-days is not a whole number from 1 to ${EXPIRES_DAYS_MAX}`);
+  return new Date(Date.parse(builtAt) + Number(days) * DAY_MS).toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+// The notes of a published release, written for a person (format section 9): 1 to NOTES_SHOWN
+// lines (blank lines are left out), each at most NOTE_CHARS characters of plain text. Refused: a
+// control character, a number of the private repo ("#123"), the form of a commit subject
+// ("feat(…): …"). The lines, or an error that names the line.
+const SUBJECT = /^(feat|fix|chore|docs|test|tests|refactor|perf|build|ci|style|revert|merge)\b(\([^)]*\))?!?:/;
+export function checkNotes(text) {
+  if (typeof text !== "string") fail("the notes are not text");
+  const lines = [];
+  text.replace(/\n$/, "").split("\n").forEach((l, i) => {
+    const n = i + 1;
+    if (/[\u0000-\u001f\u007f-\u009f\u2028\u2029]/.test(l)) fail(`notes line ${n} holds a control character`);
+    if (l.trim() === "") return;
+    if (l !== l.trim()) fail(`notes line ${n} starts or ends with white space`);
+    if (l.length > NOTE_CHARS) fail(`notes line ${n} is longer than ${NOTE_CHARS} characters`);
+    if (/#\d/.test(l)) fail(`notes line ${n} holds a "#<number>" of the private repo: say what changed in words`);
+    if (SUBJECT.test(l)) fail(`notes line ${n} is a commit subject ("feat(…): …"): write it for a person`);
+    lines.push(l);
+  });
+  if (lines.length < 1 || lines.length > NOTES_SHOWN) fail(`the notes have ${lines.length} lines: give 1 to ${NOTES_SHOWN}`);
+  return lines;
 }
 
 // app/release.json (format section 6).
@@ -154,7 +209,7 @@ export function indexJson(f, tar, stage) {
   return {
     v: 1, channel: f.channel, version: f.version, commit: f.commit, builtAt: f.builtAt, file: f.file,
     size: bytes.length, sha256: sha256(bytes), arch: "x86_64", os: "ubuntu-24.04",
-    node: f.node, pnpm: f.pnpm, gh: f.gh, minFrom: 0, security: false, expires: null, claude: null,
+    node: f.node, pnpm: f.pnpm, gh: f.gh, minFrom: 0, security: false, expires: f.expires ?? null, claude: null,
     rootParts, revoke: [], hold: false, notes: (f.notes ?? []).map(cleanNote).filter((n) => n !== "").slice(0, NOTES_MAX),
   };
 }
@@ -168,10 +223,34 @@ export function checkIndex(i) {
   checkFacts(i, ["file"]);
   if (i.v !== 1 || i.arch !== "x86_64" || i.os !== "ubuntu-24.04") fail("v, arch or os is wrong");
   if (!Number.isInteger(i.size) || i.size < 1 || !HEX64.test(i.sha256)) fail("size or sha256 is wrong");
-  if (i.minFrom !== 0 || i.security !== false || i.expires !== null || i.claude !== null || i.hold !== false || i.revoke.length !== 0) fail("a field of a later phase is set");
+  if (i.minFrom !== 0 || i.security !== false || i.claude !== null || i.hold !== false || i.revoke.length !== 0) fail("a field of a later phase is set");
+  const ends = expiresRefusal(i.expires, i.builtAt);
+  if (ends) fail(ends);
   if (i.rootParts.length !== ROOT_PARTS.length || i.rootParts.some((r, n) => r.path !== ROOT_PARTS[n].path || r.from !== ROOT_PARTS[n].from || !HEX64.test(r.sha256))) fail("rootParts is wrong");
   if (i.notes.length > NOTES_MAX || i.notes.some((n) => typeof n !== "string" || n.length > NOTE_CHARS)) fail("notes is wrong");
   return i;
+}
+
+// install.sh's check of an extracted release (its release mode, CHOIBOT_RELEASE): the entry rules
+// of the tree (checkTree, the same code as the builder's), app/release.json of format 1, the build
+// of that commit, the parts that must be there, and the versions of install.sh's own pins.
+export function checkRelease(stage, pins) {
+  const problems = checkTree(stage);
+  if (problems.length) fail(`the release breaks the entry rules: ${problems.slice(0, 3).join("; ")}`);
+  let r;
+  try { r = JSON.parse(readFileSync(join(stage, "app", "release.json"), "utf8")); } catch { fail("app/release.json is missing or not JSON"); }
+  if (!r || r.v !== 1) fail("app/release.json is not of format 1");
+  checkFacts(r);
+  let built = "";
+  try { built = readFileSync(join(stage, "app", ".next", "BUILD_ID"), "utf8").trim(); } catch { /* checked below */ }
+  if (built !== r.commit) fail("the build of the release is not its commit (app/.next/BUILD_ID)");
+  for (const f of ["app/package.json", "app/node_modules/.bin/tsx", "app/server/index.ts", "node/bin/node", "node/bin/pnpm", "gh/bin/gh"]) {
+    try { lstatSync(join(stage, f)); } catch { fail(`the release has no ${f}`); }
+  }
+  for (const k of ["node", "pnpm", "gh"]) {
+    if (pins[k] !== undefined && r[k] !== pins[k]) fail(`the release has ${k} ${r[k]}, and this install line pins ${pins[k]}: they do not belong together`);
+  }
+  return { version: r.version, commit: r.commit, channel: r.channel };
 }
 
 // Written whole (tmp + rename), with a newline at the end.
@@ -196,6 +275,20 @@ function main(argv) {
     process.stdout.write(`${s.version} ${s.commit}\n`);
     return;
   }
+  if (cmd === "installable") {
+    const [, , , , d] = argv;
+    const r = checkRelease(resolve(a), { node: b, pnpm: c, gh: d });
+    process.stdout.write(`${r.version} ${r.commit} ${r.channel}\n`);
+    return;
+  }
+  if (cmd === "notes") {
+    process.stdout.write(`${checkNotes(readFileSync(a, "utf8")).join("\n")}\n`);
+    return;
+  }
+  if (cmd === "expires") {
+    process.stdout.write(`${expiresAt(a, b)}\n`);
+    return;
+  }
   if (cmd === "release-json") return writeJson(join(resolve(a), "app", "release.json"), releaseJson(facts()));
   if (cmd === "index") {
     const f = facts();
@@ -203,7 +296,7 @@ function main(argv) {
     const i = checkIndex(indexJson(f, join(out, f.file), resolve(c ?? fail("give the stage folder"))));
     return writeJson(join(out, "index.json"), i, INDEX_MAX);
   }
-  fail("usage: release.mjs check <stage> | release-json <stage> <facts.json> | index <out> <facts.json> <stage> | source <file> [<parent file>]");
+  fail("usage: release.mjs check <stage> | release-json <stage> <facts.json> | index <out> <facts.json> <stage> | source <file> [<parent file>] | installable <stage> <node> <pnpm> <gh> | notes <file> | expires <builtAt> <days>");
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

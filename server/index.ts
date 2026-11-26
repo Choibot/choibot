@@ -64,7 +64,7 @@ import { gh, ghJson } from "./gh/exec.js";
 import { listRepos as listGhRepos } from "./gh/repos.js";
 import { registerSettingsApi } from "./settings/api.js";
 import { registerShareSettings, shareToolFromEnv } from "./settings/share.js";
-import { registerVersionApi, versionInfo } from "./release.js";
+import { registerVersionApi, registerVersionHeader, versionInfo } from "./release.js";
 import { BotCheck, testTelegramApi } from "./settings/telegram.js";
 import { consoleStepProbes, makesStale, registerSetupApi } from "./setup/api.js";
 import { registerSetupActions, type SetupLogin } from "./setup/actions.js";
@@ -136,6 +136,8 @@ import { addDeviceOn, registerAddDevice } from "./chief/adddevice.js";
 import { registerDeployApi } from "./chief/deploy/api.js";
 import { makeDeployService } from "./chief/deploy/boot.js";
 import type { DeployService } from "./chief/deploy/service.js";
+import { UpdateService } from "./update/service.js";
+import { updatePaths } from "./update/status.js";
 import { registerBrainApi } from "./chief/brain/api.js";
 import { RuleSuggester } from "./chief/brain/suggest.js";
 import { makeClaudeRun, type ClaudeRun } from "./chief/brain/distill.js";
@@ -165,6 +167,7 @@ import { prMergeState } from "./chief/queue/prgate.js";
 import { DISPLAY_NAME } from "./brand.js";
 import { namesDecision } from "./names.mjs";
 import { resolveAppDataDir, resolveClaudeBin, resolveWorkspaceDir } from "./defaults.js";
+import { agentDataDir, servicesDataDir, settingsFile } from "./layout.js";
 
 const PORT = Number(process.env.PORT ?? 3000);
 // The catch-all that hands every address with no route of its own to the page server.
@@ -174,6 +177,8 @@ const dev = process.env.NODE_ENV !== "production";
 async function main() {
   // The test settings of the route walk (server/testseams.ts): a loud stop without CHIEF_TEST=1.
   const seams = readTestSeams(process.env);
+  // Which version runs and how this console was installed: read once (server/release.ts).
+  const ownVersion = versionInfo(process.cwd());
   if ("refused" in seams) {
     console.error(`Refusing to start: ${seams.refused}.`);
     process.exit(1);
@@ -188,7 +193,7 @@ async function main() {
   }
 
   const hub = new EventHub();
-  const store = new SessionStore(process.env.AGENT_DATA_DIR ?? ".agent-data");
+  const store = new SessionStore(agentDataDir(process.env, process.cwd()));
   // The default login that the user picked on the page (Settings, Claude accounts): read before
   // any agent starts. The agent routes write the same file.
   await loadDefaultLogin(join(resolveAppDataDir(), "default-login.json"));
@@ -325,7 +330,7 @@ async function main() {
     scrollbackDir: scrollbackDirFor(),
     observer: promptWatch ? promptWatcher : undefined,
   });
-  const serviceStore = new ServiceStore(process.env.SERVICES_DATA_DIR ?? ".services-data");
+  const serviceStore = new ServiceStore(servicesDataDir(process.env, process.cwd()));
   const telegram = (process.env.TELEGRAM_BOT_TOKEN && process.env.TELEGRAM_CHAT_ID)
     ? telegramSender(process.env.TELEGRAM_BOT_TOKEN, process.env.TELEGRAM_CHAT_ID)
     : undefined;
@@ -346,6 +351,8 @@ async function main() {
   const proxy = readProxySettings(process.env);
   installProxyGate(app.server, proxy !== null && !("off" in proxy) ? proxy.tokenSha256 : null);
   registerProxyHeaderStrip(app);
+  // The version for the door, on the private listener's answers only (server/release.ts).
+  registerVersionHeader(app, ownVersion);
   // Echo the first offered subprotocol, in every mode (ruling P7): a browser
   // fails the handshake otherwise, and a paired browser offers its user token.
   // None offered → no Sec-WebSocket-Protocol header, as before.
@@ -677,7 +684,7 @@ async function main() {
   const shareTool = shareToolFromEnv(process.env);
   registerShareSettings(app, { setting: shareTool, envFile: envFilePath(process.env, process.cwd()), gate: chief?.gate });
   // Which version runs (Settings, "Version"; the updater's check after a start): read once, now.
-  registerVersionApi(app, versionInfo(process.cwd()));
+  registerVersionApi(app, ownVersion);
   // The login of the Set-up step: the app's, or gh's own (below).
   const stepLogin = (): SetupLogin => (githubApp ? { state: () => githubApp.loginState(), start: (o) => githubApp.start(o) } : setupLogin);
   // The set-up steps and their state (setup/steps.ts): the list `doctor` prints, for the browser.
@@ -913,8 +920,9 @@ async function main() {
   let stopPrWatch: (() => void) | undefined;
   let stopCardPoster: (() => void) | undefined;
   let stopReminders: (() => void) | undefined;
-  // The console's own deploy ticket (spec §5.7): with the chief flag on only.
-  let deploy: DeployService | undefined;
+  // The console's own deploy ticket (spec §5.7): with the chief flag on only. A release or an
+  // archive install gets the Update ticket of root's updater in its place (server/update).
+  let deploy: DeployService | UpdateService | undefined;
   let stopDeployWatch: (() => void) | undefined;
   if (chief) {
     // The queue Deliverer (spec §5.4). runChiefBoot starts it, after its boot
@@ -945,7 +953,15 @@ async function main() {
     // The deploy ticket and its one user-only route (spec §5.7). Built before the Telegram
     // routes, which give the card its Deploy button. It acts only when this process is the
     // console's own unit and a production build; else it does nothing and the route says why.
-    const deployService = await makeDeployService(chief, { dev });
+    // A release or an archive install (every hosted console): the Update ticket, from root's
+    // updater; its paths are constants there. A git checkout: Deploy, as before (a test instance
+    // with CONSOLE_UPDATE_TEST_DIR: the Update ticket from its fake status files).
+    const kind = ownVersion.kind;
+    const updates = kind !== "checkout" || seams.updateDir !== null ? updatePaths(kind, seams.updateDir) : null;
+    if (updates) console.warn(`[update] the Update ticket of root's updater (${kind}${updates.test ? ", a test folder" : ""}): it waits for root's status file; no Deploy here`);
+    const deployService = updates
+      ? new UpdateService({ store: chief.queue, paths: updates, running: ownVersion })
+      : await makeDeployService(chief, { dev });
     deploy = deployService;
     registerDeployApi(app, { gate: chief.gate, deploy: deployService });
     let poster: CardPoster | undefined;
@@ -1426,7 +1442,7 @@ async function main() {
               dataDir: chief.paths.root,
               // Check (1)'s other facts, as `choibot doctor` reads them (ruling F6).
               cronDir: resolveCronDataDir(),
-              envFile: join(process.cwd(), ".env"),
+              envFile: settingsFile(process.cwd()),
               homeRoot: agentHomeRoot(),
               // No getuid (not POSIX): -1 matches no owner, so the mode reads weak.
               selfUid: process.getuid?.() ?? -1,

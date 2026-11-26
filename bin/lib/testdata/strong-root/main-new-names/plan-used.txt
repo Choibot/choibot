@@ -1,0 +1,176 @@
+# packages: Hard links are protected (no account can link a file it does not own), and the tools of this set-up: access lists (acl) and sudo.
+sh -c 'test "$(sysctl -n fs.protected_hardlinks)" = 1'
+sh -c 'command -v setfacl && command -v visudo' >/dev/null 2>&1 || apt-get install -y --no-install-recommends acl sudo
+
+# accounts: The agents' own account (choibot-agent, no sudo) and the group it shares with choibot. The second account (choibot-chief, no sudo) for the fleet master, the leads and the Coordinator: its own group, which choibot is in and choibot-agent is not.
+getent group choibot-shared >/dev/null 2>&1 || groupadd --system choibot-shared
+id -u choibot-agent >/dev/null 2>&1 || useradd --create-home --home-dir /home/choibot-agent --shell /bin/bash --user-group choibot-agent
+usermod -aG choibot-shared choibot-agent
+sh -c 'id -nG -- "$1" | tr " " "\n" | grep -qx -- "$2"' sh choibot choibot-shared >/dev/null 2>&1 || usermod -aG choibot-shared choibot
+runuser -u choibot-agent -- chmod 0700 /home/choibot-agent
+runuser -u choibot-agent -- install -d -m 0700 /home/choibot-agent/.claude
+id -u choibot-chief >/dev/null 2>&1 || useradd --create-home --home-dir /home/choibot-chief --shell /bin/bash --user-group choibot-chief
+usermod -aG choibot-shared choibot-chief
+sh -c 'id -nG -- "$1" | tr " " "\n" | grep -qx -- "$2"' sh choibot choibot-chief >/dev/null 2>&1 || usermod -aG choibot-chief choibot
+runuser -u choibot-chief -- chmod 0700 /home/choibot-chief
+runuser -u choibot-chief -- install -d -m 0700 /home/choibot-chief/.claude
+sh -c '! id -nG -- "$1" | tr " " "\n" | grep -qx -- "$2"' sh choibot-agent choibot-chief
+sh -c 'g=$(id -gn -- "$2") && ! id -nG -- "$1" | tr " " "\n" | grep -qx -- "$g"' sh choibot-chief choibot
+
+# tools: Node, Claude Code, gh and dtach in /usr/local/lib/choibot, owned by root: both accounts run them, and neither can change them. choibot reads each source.
+install -d -o root -g root -m 0755 /usr/local/lib/choibot /usr/local/lib/choibot/bin
+rm -rf /usr/local/lib/choibot/node.new
+install -d -o root -g root -m 0700 /usr/local/lib/choibot/node.new
+bash -c 'set -o pipefail; runuser -u "$1" -- tar -C "$2" -cf - . | tar -C "$3" -xf - --no-same-owner --no-same-permissions' bash choibot /opt/choibot/node /usr/local/lib/choibot/node.new
+chmod -R u-s,g-s,go-w /usr/local/lib/choibot/node.new
+sh -c 'test -z "$(find "$1" \( -type b -o -type c -o -type p -o -type s -o -perm /6000 \) -print -quit)"' sh /usr/local/lib/choibot/node.new
+chmod 0755 /usr/local/lib/choibot/node.new
+rm -rf /usr/local/lib/choibot/node
+mv /usr/local/lib/choibot/node.new /usr/local/lib/choibot/node
+sh -c 'runuser -u "$1" -- cat -- "$2" > "$3"' sh choibot /home/choibot/.local/share/claude/versions/2.1.400 /usr/local/lib/choibot/bin/claude.new
+chown root:root /usr/local/lib/choibot/bin/claude.new
+chmod 0755 /usr/local/lib/choibot/bin/claude.new
+mv -f /usr/local/lib/choibot/bin/claude.new /usr/local/lib/choibot/bin/claude
+sh -c 'runuser -u "$1" -- cat -- "$2" > "$3"' sh choibot /usr/bin/dtach /usr/local/lib/choibot/bin/dtach.new
+chown root:root /usr/local/lib/choibot/bin/dtach.new
+chmod 0755 /usr/local/lib/choibot/bin/dtach.new
+mv -f /usr/local/lib/choibot/bin/dtach.new /usr/local/lib/choibot/bin/dtach
+sh -c 'runuser -u "$1" -- cat -- "$2" > "$3"' sh choibot /opt/choibot/gh/bin/gh /usr/local/lib/choibot/bin/gh.new
+chown root:root /usr/local/lib/choibot/bin/gh.new
+chmod 0755 /usr/local/lib/choibot/bin/gh.new
+mv -f /usr/local/lib/choibot/bin/gh.new /usr/local/lib/choibot/bin/gh
+
+# private: The console's data and settings: only choibot reads them. choibot does it itself.
+runuser -u choibot -- install -d -m 0700 /home/choibot/.local/share/choibot
+runuser -u choibot -- chmod 0700 /home/choibot/.local/share/choibot
+runuser -u choibot -- install -d -m 0700 /home/choibot/.local/share/choibot/agents
+runuser -u choibot -- chmod 0700 /home/choibot/.local/share/choibot/agents
+runuser -u choibot -- install -d -m 0700 /home/choibot/.local/share/choibot/services
+runuser -u choibot -- chmod 0700 /home/choibot/.local/share/choibot/services
+runuser -u choibot -- test -O /opt/choibot/console.env
+runuser -u choibot -- chmod 0600 /opt/choibot/console.env
+runuser -u choibot -- chmod 0600 /opt/choibot/install.log
+
+# shared: The folders the console and its agents share: the agents' homes, the session sockets, the widgets, the workspace.
+install -d -o root -g root -m 0755 /srv/choibot
+chown root:root /srv/choibot
+chmod 0755 /srv/choibot
+test '!' -L /srv/choibot/agent-homes
+install -d -o root -g choibot-shared -m 3770 /srv/choibot/agent-homes
+chown root:choibot-shared /srv/choibot/agent-homes
+chmod 3770 /srv/choibot/agent-homes
+folder /srv/choibot/agent-homes/clones (root:choibot-shared 3770): mkdir, or a real folder of root that is there; owner and mode set on the open folder
+folder /srv/choibot/agent-homes/uploads (choibot:choibot-shared 2750): mkdir, or a real folder of root or choibot that is there; owner and mode set on the open folder
+folder /srv/choibot/agent-homes/settings (choibot:choibot-shared 2750): mkdir, or a real folder of root or choibot that is there; owner and mode set on the open folder
+write /etc/tmpfiles.d/choibot-dtach.conf (root:root 0644):
+    d /run/choibot-dtach 3770 choibot choibot-shared -
+systemd-tmpfiles --create /etc/tmpfiles.d/choibot-dtach.conf
+folder /srv/choibot/agent-homes/chief (root:choibot-chief 3770): mkdir, or a real folder of root that is there; owner and mode set on the open folder
+write /etc/tmpfiles.d/choibot-dtach-chief.conf (root:root 0644):
+    d /run/choibot-dtach-chief 3770 choibot choibot-chief -
+systemd-tmpfiles --create /etc/tmpfiles.d/choibot-dtach-chief.conf
+runuser -u choibot -- install -d -m 2770 /opt/choibot/widgets
+runuser -u choibot -- chgrp choibot-shared /opt/choibot/widgets
+runuser -u choibot -- chmod 2770 /opt/choibot/widgets
+runuser -u choibot -- setfacl -R -m g:choibot-shared:rwX -m d:g:choibot-shared:rwX /opt/choibot/widgets
+runuser -u choibot -- test -d /srv/choibot/workspace -a -O /srv/choibot/workspace
+runuser -u choibot -- chgrp choibot-shared /srv/choibot/workspace
+runuser -u choibot -- chmod 2750 /srv/choibot/workspace
+
+# helper: The exec helper (/usr/local/bin/choibot-agent-exec): the one way the console starts a process as choibot-agent.
+sh -c 'runuser -u "$1" -- cat -- "$2" > "$3"' sh choibot /opt/choibot/app/deploy/choibot-agent-exec /usr/local/bin/choibot-agent-exec.new
+chown root:root /usr/local/bin/choibot-agent-exec.new
+chmod 0755 /usr/local/bin/choibot-agent-exec.new
+mv -f /usr/local/bin/choibot-agent-exec.new /usr/local/bin/choibot-agent-exec
+write /etc/choibot-agent-exec.conf (root:root 0644):
+    # /etc/choibot-agent-exec.conf — written by `strong-setup` of ChoiBot (see deploy/choibot-agent-exec.conf.example).
+    DTACH_DIR=/run/choibot-dtach
+    DTACH_BIN=/usr/local/lib/choibot/bin/dtach
+    WORKTREE_ROOT=/srv/choibot/workspace
+    WORKSPACE_DIR=/srv/choibot/workspace
+    AGENT_HOME_ROOT=/srv/choibot/agent-homes
+    AGENT_PATH=/usr/local/lib/choibot/bin:/usr/local/lib/choibot/node/bin:/usr/local/bin:/usr/bin:/bin
+    AGENT_UID=<uid of the agent account>
+    CHIEF_UID=<uid of the second account>
+    CHIEF_DTACH_DIR=/run/choibot-dtach-chief
+write /etc/sudoers.d/choibot-agent-exec (root:root 0440, checked by visudo -cf):
+    # /etc/sudoers.d/choibot-agent-exec — written by `strong-setup` of ChoiBot. The console runs its agents through
+    # the exec helper as the agent account; only these env keys reach the helper.
+    choibot ALL=(choibot-agent) NOPASSWD: /usr/local/bin/choibot-agent-exec
+    # The second account: the fleet master, the leads and the Coordinator.
+    choibot ALL=(choibot-chief) NOPASSWD: /usr/local/bin/choibot-agent-exec
+    Defaults!/usr/local/bin/choibot-agent-exec env_keep += "CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS PORT CLAUDE_CONFIG_DIR CODEX_HOME TERM LANG CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL CRON_DATA_DIR TZ CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL"
+
+# agent-git: The git settings of choibot-agent: the repos belong to choibot, and an automatic clean-up would write where agents cannot.
+runuser -u choibot-agent -- git config --global --replace-all safe.directory '*'
+runuser -u choibot-agent -- git config --global gc.auto 0
+runuser -u choibot-agent -- git config --global maintenance.auto false
+
+# chief-git: The git settings of choibot-chief: no automatic clean-up, and no folder that git takes as safe but the agent folders of its own homes, which the console names one exact path at a time (the helper's git-safe). Any other entry ("*", a worker's clone) is removed; those stay, so its git there keeps working.
+runuser -u choibot-chief -- git config --global gc.auto 0
+runuser -u choibot-chief -- git config --global maintenance.auto false
+runuser -u choibot-chief -- sh -c 'git config --global --get-all safe.directory 2>/dev/null | while IFS= read -r v; do
+  case $v in
+    "$1"/fleet-master/agent | "$1"/coordinator/agent) continue ;;
+    "$1"/leads/*/agent)
+      a=${v#"$1"/leads/}; a=${a%/agent}
+      case $a in "" | -* | *[!a-z0-9-]*) ;; *) [ ${#a} -le 32 ] && continue ;; esac ;;
+  esac
+  git config --global --fixed-value --unset-all safe.directory "$v" || exit 1
+  echo "removed the safe.directory entry $v"
+done' sh /srv/choibot/agent-homes/chief
+
+# settings: The console's settings for strong protection (choibot writes them). They take effect at its start (the next step).
+settings, as choibot: CHIEF_AGENT_UID=<uid of the agent account> AGENT_HOME_ROOT=/srv/choibot/agent-homes AGENT_CLAUDE_CONFIG_DIR=/home/choibot-agent/.claude AGENT_DTACH_DIR=/run/choibot-dtach AGENT_DTACH_BIN=/usr/local/lib/choibot/bin/dtach CLAUDE_CODE_EXECUTABLE=/usr/local/lib/choibot/bin/claude AGENT_EXEC_HELPER=/usr/local/bin/choibot-agent-exec CHIEF_PERSISTENT_UID=<uid of the second account> AGENT_CHIEF_CLAUDE_CONFIG_DIR=/home/choibot-chief/.claude AGENT_CHIEF_DTACH_DIR=/run/choibot-dtach-chief
+
+# restart: The console starts again ONLY when this run changed its settings or the groups of choibot, when the user manager of choibot lacks the group choibot-chief (a group reaches a process only at its start), when the console does not run, or when the settings file is newer than the console's process. Then the user manager of choibot starts again, and before it starts again every agent that runs stops (the console starts them again). Else: no restart. Where it does not run (an image build), its first start does it.
+sh -c 'if ! systemctl is-active --quiet "user@$1.service"; then echo "The user manager of $2 does not run: its first start gives the console its group and its settings."; exit 0; fi
+why=""
+[ "$3" = 1 ] && why="this run changed the settings or the groups of $2"
+if [ -z "$why" ]; then
+  gid=$(getent group "$4" | cut -d: -f3)
+  mpid=$(systemctl show -p MainPID --value "user@$1.service")
+  if ! { [ -n "$gid" ] && [ -n "$mpid" ] && [ "$mpid" != 0 ] && grep "^Groups:" "$5/$mpid/status" | tr -s " \t" "\n" | grep -qx -- "$gid"; }; then why="the user manager of $2 lacks the group $4"; fi
+fi
+if [ -z "$why" ]; then
+  cg=$(systemctl show -p ControlGroup --value "user@$1.service")
+  d=$(find "$8$cg" -mindepth 1 -maxdepth 3 -type d -name "$7" 2>/dev/null | head -n 1)
+  pid=""; [ -n "$d" ] && pid=$(head -n 1 "$d/cgroup.procs" 2>/dev/null)
+  if [ -z "$pid" ]; then why="the console does not run"
+  else
+    age=$(ps -o etimes= -p "$pid" | tr -d " ")
+    m=$(runuser -u "$2" -- stat -c %Y -- "$6")
+    if [ -z "$age" ] || [ -z "$m" ] || [ "$m" -gt $(( $(date +%s) - age )) ]; then why="the settings file is newer than the console'\''s process"; fi
+  fi
+fi
+if [ -z "$why" ]; then echo "The console already runs with these settings and this group: no restart."; exit 0; fi
+echo "A restart: $why. Every agent that runs stops now, and the console starts it again."
+systemctl restart "user@$1.service" && echo "The console of $2 started again."' sh 1000 choibot '<changed in this run>' choibot-chief /proc /opt/choibot/console.env choibot.service /sys/fs/cgroup
+
+# check: Check, after the start: choibot can start the helper as both accounts; the folders of the second account; a file of choibot in its homes is for it and not for choibot-agent; the console's process has the group.
+runuser -u choibot -- sudo -n -u choibot-agent /usr/local/bin/choibot-agent-exec probe
+runuser -u choibot -- sudo -n -u choibot-chief /usr/local/bin/choibot-agent-exec probe
+sh -c 'test ! -L "$1" && test "$(stat -c "%U:%G %a" -- "$1")" = "$2"' sh /srv/choibot/agent-homes/chief 'root:choibot-chief 3770'
+sh -c 'test ! -L "$1" && test "$(stat -c "%U:%G %a" -- "$1")" = "$2"' sh /run/choibot-dtach-chief 'choibot:choibot-chief 3770'
+sh -c 'f=$(runuser -u "$2" -- mktemp -- "$1/.strong-check.XXXXXX") || { echo "$2 cannot make a file in $1: its group $3 is missing"; exit 1; }
+r=0
+runuser -u "$2" -- sh -c '\''printf "strong-check\n" >> "$1" && chmod 0640 -- "$1"'\'' sh "$f" || { echo "$2 cannot write its file $f"; r=1; }
+if [ $r = 0 ] && ! runuser -u "$3" -- cat -- "$f" > /dev/null 2>&1; then echo "$3 cannot read a file of $2 in its homes"; r=1; fi
+if runuser -u "$4" -- cat -- "$f" > /dev/null 2>&1; then echo "$4 can read a file of $2 in the homes of $3"; r=1; fi
+runuser -u "$2" -- rm -f -- "$f"
+[ $r = 0 ] && echo "A file of $2 in its homes: $3 reads it, $4 does not."
+exit $r' sh /srv/choibot/agent-homes/chief choibot choibot-chief choibot-agent
+sh -c 'systemctl is-active --quiet "user@$1.service" || { echo "The console does not run: its first start gets the group."; exit 0; }
+cg=$(systemctl show -p ControlGroup --value "user@$1.service")
+gid=$(getent group "$3" | cut -d: -f3)
+[ -n "$cg" ] && [ -n "$gid" ] || { echo "no cgroup or no group $3"; exit 1; }
+i=0; pid=""
+while [ $i -lt 60 ]; do
+  d=$(find "$4$cg" -mindepth 1 -maxdepth 3 -type d -name "$2" 2>/dev/null | head -n 1)
+  [ -n "$d" ] && pid=$(head -n 1 "$d/cgroup.procs" 2>/dev/null)
+  [ -n "$pid" ] && break
+  i=$((i + 1)); sleep 1
+done
+[ -n "$pid" ] || { echo "The console ($2) did not start within 60 seconds."; exit 1; }
+grep "^Groups:" "$5/$pid/status" | tr -s " \t" "\n" | grep -qx -- "$gid" || { echo "The console (pid $pid) does not have the group $3 (gid $gid)."; exit 1; }
+echo "The console (pid $pid) has the group $3."' sh 1000 choibot.service choibot-chief /sys/fs/cgroup /proc

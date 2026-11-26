@@ -21,6 +21,7 @@ import { ClaimLinks } from "./chief/claimlink.js";
 import { BoxCodes, registerFirstRun } from "./chief/firstrun.js";
 import { gateMerge, gateUser, makeGate } from "./chief/gate.js";
 import { registerStrongAccess } from "./chief/access.js";
+import { VERSION_HEADER, registerVersionHeader } from "./release.js";
 import {
   PROXY_TOKEN_HEADER, allowedWithoutDevice, hostInRange, inRange, installProxyGate, isTrustedProxyRequest, listenProxy, localAddressIn,
   parseProxySettings, privateRange, readProxySettings, registerDeviceGate, registerProxyHeaderStrip, devListenerRefusal, stripProxyHeader, type ProxyListener,
@@ -57,6 +58,7 @@ async function world(o: { lock?: boolean; strong?: boolean } = {}): Promise<Worl
   const app = Fastify();
   installProxyGate(app.server, HASH);
   registerProxyHeaderStrip(app);
+  registerVersionHeader(app, { version: 849, commit: "b".repeat(40) });
   await app.register(websocket);
   registerOriginGuard(app);
   const devices = new DeviceStore(join(d, "devices.json"));
@@ -101,7 +103,7 @@ async function world(o: { lock?: boolean; strong?: boolean } = {}): Promise<Worl
   return { app, proxy, devices, loopbackPort: (app.server.address() as { port: number }).port };
 }
 
-type Answer = { status: number; body: string } | { error: string };
+type Answer = { status: number; body: string; headers: Record<string, string | string[] | undefined> } | { error: string };
 function call(w: World, o: { path: string; method?: string; token?: string | null; from?: string; headers?: Record<string, string>; body?: string }): Promise<Answer> {
   return new Promise((resolve) => {
     const headers: Record<string, string> = { host: "s1.example", ...(o.headers ?? {}) };
@@ -111,13 +113,13 @@ function call(w: World, o: { path: string; method?: string; token?: string | nul
       let body = "";
       res.setEncoding("utf8");
       res.on("data", (c: string) => { body += c; });
-      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body, headers: res.headers }));
     });
     req.on("error", (e) => resolve({ error: (e as NodeJS.ErrnoException).code ?? e.message }));
     req.end(o.body);
   });
 }
-const ok = (a: Answer): { status: number; body: string } => { if ("error" in a) throw new Error(`no answer: ${a.error}`); return a; };
+const ok = (a: Answer): { status: number; body: string; headers: Record<string, string | string[] | undefined> } => { if ("error" in a) throw new Error(`no answer: ${a.error}`); return a; };
 
 describe("the settings of the front proxy", () => {
   const full = { CONSOLE_PROXY_FROM: "10.0.0.2", CONSOLE_PROXY_NETWORK: "10.0.0.0/16", CONSOLE_PROXY_PORT: "3443", CONSOLE_PROXY_TOKEN_SHA256: HASH, CONSOLE_PROXY_TLS_DIR: "/srv/x/proxy-tls" };
@@ -190,6 +192,18 @@ describe("the private listener", () => {
     expect(ok(await call(w, { path: "/api/version", headers: { "x-choibot-user": device } })).status).toBe(200);
     // Every other route stays closed to the loopback caller with no credential.
     expect((await fetch(`http://127.0.0.1:${w.loopbackPort}/api/events`)).status).toBe(401);
+  });
+
+  it("gives the door the version on every answer of the private listener, also a refusal; never on loopback", async () => {
+    const w = await world();
+    const page = ok(await call(w, { path: "/", method: "HEAD" }));
+    expect([page.status, page.headers[VERSION_HEADER]]).toEqual([200, `849 ${"b".repeat(40)}`]);
+    const refused = ok(await call(w, { path: "/api/events" }));
+    expect([refused.status, refused.headers[VERSION_HEADER]]).toEqual([401, `849 ${"b".repeat(40)}`]);
+    const local = await fetch(`http://127.0.0.1:${w.loopbackPort}/`);
+    expect(local.headers.get(VERSION_HEADER)).toBeNull();
+    const injected = await w.app.inject({ method: "GET", url: "/" });
+    expect(injected.headers[VERSION_HEADER]).toBeUndefined();
   });
 
   it("removes the token header of a request that did not come through the server's events (an inject, a second server)", async () => {

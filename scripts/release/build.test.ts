@@ -121,3 +121,47 @@ describe("build.sh --print-version", () => {
     expect([r.status, r.stdout]).toEqual([0, `850 ${off}\n`]);
   });
 });
+
+// A published release (--expires-days): its end, its notes for a person and their scan are checked
+// before anything is built (the commit is looked at only after them).
+describe("build.sh: a published release, checked before the build", () => {
+  let dir: string;
+  beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "release-publish-")); });
+  afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
+  const env = { PATH: `${dirname(process.execPath)}:/usr/bin:/bin`, HOME: tmpdir(), LANG: "C.UTF-8" };
+  const build = (...args: string[]) => {
+    const r = spawnSync("bash", [BUILD, "--ref", "no-such-commit-here", "--out", join(dir, "out"), ...args], { encoding: "utf8", env });
+    return { code: r.status, err: r.stderr.trim().split("\n").at(-1) ?? "", out: r.stdout };
+  };
+  const notes = (text: string) => { writeFileSync(join(dir, "notes.txt"), text); return join(dir, "notes.txt"); };
+  // The scan tool: its "scan-text" names a finding (exit 1) or passes (exit 0).
+  const tool = (finding: boolean) => {
+    const f = join(dir, finding ? "finds.mjs" : "passes.mjs");
+    writeFileSync(f, finding ? 'console.log("release-notes.txt:1  private word"); process.exit(1);\n' : 'if (process.argv[2] !== "scan-text" || process.argv[3] !== "--file") process.exit(9); console.log("passes");\n');
+    return f;
+  };
+  const PAST = /no-such-commit-here is not a commit/;
+
+  it("--expires-days needs --notes-file and --scan, a commit of main, and a whole number from 1 to 400", () => {
+    expect(build("--expires-days", "90").err).toBe("✖ a published release (--expires-days) needs --notes-file: it never carries raw commit subjects");
+    expect(build("--expires-days", "90", "--notes-file", notes("One line.\n")).err).toBe("✖ a published release (--expires-days) needs --scan <the export tool>: its notes must pass the public tree's checks");
+    expect(build("--expires-days", "90", "--notes-file", notes("One line.\n"), "--scan", tool(false), "--unmerged").err).toBe("✖ a published release is a commit of main: not with --unmerged");
+    for (const n of ["0", "401", "90d"]) expect(build("--expires-days", n, "--notes-file", notes("One line.\n"), "--scan", tool(false)).err).toBe("✖ --expires-days is not a whole number from 1 to 400");
+  });
+
+  it("the notes: refused with the line that says why; a private word found by the scan stops the build", () => {
+    expect(build("--notes-file", notes("feat(update): the button\n")).err).toBe('✖ the notes are refused (the line above says why)');
+    expect(spawnSync("bash", [BUILD, "--ref", "x", "--out", join(dir, "o"), "--notes-file", notes("feat(update): the button\n")], { encoding: "utf8", env }).stderr).toContain('notes line 1 is a commit subject ("feat(…): …"): write it for a person');
+    const r = build("--expires-days", "90", "--notes-file", notes("One line.\n"), "--scan", tool(true));
+    expect(r.err).toBe("✖ the notes fail the public tree's checks (above): change them");
+    expect(r.out).toContain("release-notes.txt:1  private word");
+    expect(build("--notes-file", notes("One.\n"), "--notes-from", "HEAD").err).toBe("✖ give --notes-file or --notes-from, not both");
+  });
+
+  it("good notes and a passing scan go on to the build (here: the commit is looked at next); notes with no scan say so", () => {
+    expect(build("--expires-days", "90", "--notes-file", notes("ChoiBot updates itself now.\n"), "--scan", tool(false)).err).toMatch(PAST);
+    const local = build("--notes-file", notes("A local proof.\n"));
+    expect(local.err).toMatch(PAST);
+    expect(local.out).toContain("the notes are not scanned (no --scan): a local release only");
+  });
+});

@@ -22,6 +22,7 @@ import { isAgentId } from "../ids.js";
 import type { FilesGuard } from "../files/api.js";
 import { gateUser, pairRequired, type ChiefGate } from "./gate.js";
 import { hardenedDeployment } from "./hardened.js";
+import { SETTINGS_NAME } from "../layout.js";
 
 type Env = Record<string, string | undefined>;
 
@@ -66,10 +67,10 @@ async function real(p: string): Promise<string> {
   }
 }
 
-// A .env* path component. Also one git quoted (S2): with core.quotepath=off
-// git still quotes a name with a `"`, `\` or control char, so its first
-// component starts with `".env`.
-const namesEnv = (p: string): boolean => p.split(sep).some((c) => c.startsWith(".env") || c.startsWith('".env'));
+// A .env* path component, or the settings file of a release layout (server/layout.ts). Also one git
+// quoted (S2): with core.quotepath=off git still quotes a name with a `"`, `\` or control char, so its
+// first component starts with `".env`.
+const namesEnv = (p: string): boolean => p.split(sep).some((c) => c.startsWith(".env") || c.startsWith('".env') || c === SETTINGS_NAME || c === `"${SETTINGS_NAME}"`);
 
 // Whether a non-USER caller is refused the files-route param q. Resolved as
 // the route does (resolve against the cwd, then realpath).

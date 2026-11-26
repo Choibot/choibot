@@ -5,7 +5,7 @@ import { chmodSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync }
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { ROOT_PARTS, checkFacts, checkIndex, checkTree, cleanNote, indexJson, releaseJson, tarName } from "./release.mjs";
+import { EXPIRES_DAYS_MAX, NOTES_SHOWN, ROOT_PARTS, checkFacts, checkIndex, checkNotes, checkRelease, checkTree, cleanNote, expiresAt, expiresRefusal, indexJson, releaseJson, tarName } from "./release.mjs";
 
 const COMMIT = "33c531a" + "1".repeat(33);
 const facts = { version: 840, commit: COMMIT, channel: "test", builtAt: "2026-11-26T19:00:00Z", node: "24.22.3", pnpm: "10.34.9", gh: "2.105.0" };
@@ -95,6 +95,32 @@ describe("the release tree", () => {
     }
   });
 
+  it("install.sh's check of an extracted release: the entry rules, release.json, its build, its parts, the pins", () => {
+    const pins = { node: "24.22.3", pnpm: "10.34.9", gh: "2.105.0" };
+    const make = () => {
+      file("app/release.json", JSON.stringify({ v: 1, ...facts }));
+      file("app/.next/BUILD_ID", COMMIT);
+      file("app/server/index.ts", "// the server");
+      file("app/node_modules/.bin/tsx", "#!/bin/sh", 0o755);
+      file("gh/bin/gh", "elf", 0o755);
+    };
+    make();
+    expect(checkRelease(stage, pins)).toEqual({ version: 840, commit: COMMIT, channel: "test" });
+    expect(() => checkRelease(stage, { ...pins, node: "24.23.0" })).toThrow("the release has node 24.22.3, and this install line pins 24.23.0: they do not belong together");
+    file("app/.next/BUILD_ID", "f".repeat(40));
+    expect(() => checkRelease(stage, pins)).toThrow("the build of the release is not its commit (app/.next/BUILD_ID)");
+    file("app/.next/BUILD_ID", COMMIT);
+    rmSync(join(stage, "app/node_modules/.bin/tsx"));
+    expect(() => checkRelease(stage, pins)).toThrow("the release has no app/node_modules/.bin/tsx");
+    file("app/node_modules/.bin/tsx", "#!/bin/sh", 0o755);
+    file("app/release.json", JSON.stringify({ v: 2, ...facts }));
+    expect(() => checkRelease(stage, pins)).toThrow("app/release.json is not of format 1");
+    file("app/release.json", JSON.stringify({ v: 1, ...facts }));
+    // The same entry rules as the builder's: a link out of its top folder.
+    symlinkSync("../../etc", join(stage, "app/out"));
+    expect(() => checkRelease(stage, pins)).toThrow(/the release breaks the entry rules: app\/out: a link out of app\//);
+  });
+
   it("refuses wrong facts and an index of another shape", () => {
     expect(() => checkFacts({ ...facts, version: 0 })).toThrow(/version/);
     expect(() => checkFacts({ ...facts, commit: "33c531a" })).toThrow(/commit/);
@@ -103,5 +129,50 @@ describe("the release tree", () => {
     expect(() => checkFacts({ ...facts, file: "other.tar.gz" }, ["file"])).toThrow(/file/);
     expect(() => checkIndex({ v: 1 })).toThrow(/the index has the fields/);
     expect(cleanNote("  a\tb  ")).toBe("a b");
+  });
+});
+
+describe("a published release: its end time and its notes for a person", () => {
+  const BUILT = "2026-11-26T19:00:00Z";
+  it("expires: null for a local release; else after builtAt and at most 400 days after it, in the index's time form", () => {
+    expect(expiresRefusal(null, BUILT)).toBeNull();
+    expect(expiresAt(BUILT, 90)).toBe("2027-02-24T19:00:00Z");
+    expect(expiresRefusal(expiresAt(BUILT, 90), BUILT)).toBeNull();
+    expect(expiresRefusal(expiresAt(BUILT, EXPIRES_DAYS_MAX), BUILT)).toBeNull();
+    expect(expiresRefusal("2027-12-31T19:00:01Z", BUILT)).toBe("expires is more than 400 days after builtAt");
+    expect(expiresRefusal(BUILT, BUILT)).toBe("expires is not after builtAt");
+    expect(expiresRefusal("2026-11-25T19:00:00Z", BUILT)).toBe("expires is not after builtAt");
+    for (const bad of ["2027-02-24T19:00:00.000Z", "2027-02-24 19:00:00Z", "2027-02-30T19:00:00Z", 90, ""]) expect([bad, expiresRefusal(bad, BUILT)]).toEqual([bad, "expires is not null or a UTC time in seconds"]);
+    for (const bad of ["0", "401", "9x", "-1", "1.5"]) expect(() => expiresAt(BUILT, bad)).toThrow(/--expires-days is not a whole number from 1 to 400/);
+  });
+
+  it("checkIndex takes an end time in range, and refuses one out of it", () => {
+    const i = { v: 1, channel: "test", version: 840, commit: COMMIT, builtAt: BUILT, file: tarName(840, COMMIT), size: 1, sha256: "a".repeat(64), arch: "x86_64", os: "ubuntu-24.04",
+      node: "24.22.3", pnpm: "10.34.9", gh: "2.105.0", minFrom: 0, security: false, expires: null as string | null, claude: null,
+      rootParts: ROOT_PARTS.map((r) => ({ path: r.path, sha256: "b".repeat(64), from: r.from })), revoke: [], hold: false, notes: ["One line."] };
+    expect(checkIndex(i).expires).toBeNull();
+    expect(checkIndex({ ...i, expires: "2027-02-24T19:00:00Z" }).expires).toBe("2027-02-24T19:00:00Z");
+    expect(() => checkIndex({ ...i, expires: "2028-02-24T19:00:00Z" })).toThrow("expires is more than 400 days after builtAt");
+    expect(() => checkIndex({ ...i, expires: "2026-11-26T18:59:59Z" })).toThrow("expires is not after builtAt");
+    expect(() => checkFacts({ ...facts, expires: "soon" })).toThrow("expires is not null or a UTC time in seconds");
+  });
+
+  it("the notes: 1 to 5 lines of plain text, each at most 200 characters; blank lines are left out", () => {
+    expect(checkNotes("ChoiBot updates itself now.\n\nThe Settings page shows the version.\n")).toEqual(["ChoiBot updates itself now.", "The Settings page shows the version."]);
+    expect(checkNotes("Fix: the login works again.")).toEqual(["Fix: the login works again."]);
+    expect(checkNotes(Array.from({ length: NOTES_SHOWN }, (_, n) => `Line ${n}.`).join("\n"))).toHaveLength(NOTES_SHOWN);
+    const no: [string, string][] = [
+      ["", "the notes have 0 lines: give 1 to 5"],
+      ["\n \n", "the notes have 0 lines: give 1 to 5"],
+      [Array.from({ length: 6 }, (_, n) => `Line ${n}.`).join("\n"), "the notes have 6 lines: give 1 to 5"],
+      [`One.\n${"x".repeat(201)}`, "notes line 2 is longer than 200 characters"],
+      ["One.\r\nTwo.", "notes line 1 holds a control character"],
+      ["A bell \u0007 here.", "notes line 1 holds a control character"],
+      ["The fix of #153 is in.", 'notes line 1 holds a "#<number>" of the private repo: say what changed in words'],
+      ["feat(update): the Update button", 'notes line 1 is a commit subject ("feat(…): …"): write it for a person'],
+      ["One.\nfix: a thing", 'notes line 2 is a commit subject ("feat(…): …"): write it for a person'],
+      ["  Indented.", "notes line 1 starts or ends with white space"],
+    ];
+    for (const [text, why] of no) expect(() => checkNotes(text)).toThrow(why);
   });
 });

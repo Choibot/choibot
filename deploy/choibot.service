@@ -15,7 +15,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory={{REPO_DIR}}
-EnvironmentFile={{REPO_DIR}}/.env
+EnvironmentFile={{SETTINGS_FILE}}
 Environment=NODE_ENV=production
 Environment=PATH={{PATH}}
 ExecStart={{PNPM_BIN}} start

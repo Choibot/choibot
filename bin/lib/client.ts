@@ -14,6 +14,7 @@ import type { Cli } from "./cli.js";
 import { parseEnv } from "./env.js";
 import { CLI_NAME } from "../../server/brand.js";
 import { envKey, envRead, names } from "../../server/names.mjs";
+import { settingsFile } from "../../server/layout.js";
 
 export type CliEnv = Record<string, string | undefined>;
 export class CliError extends Error {
@@ -44,7 +45,7 @@ export function withInstallPort(
   readFile: (p: string) => string | null = (p) => { try { return readFileSync(p, "utf8"); } catch { return null; } },
 ): CliEnv {
   if (env.PORT) return env;
-  const text = readFile(join(dir, ".env"));
+  const text = readFile(settingsFile(dir));
   const port = text === null ? undefined : parseEnv(text).get("PORT");
   return port && /^\d{1,5}$/.test(port) ? { ...env, PORT: port } : env;
 }

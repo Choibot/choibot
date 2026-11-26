@@ -148,6 +148,17 @@ describe("notMerged / rowMeta", () => {
     const prShots = item({ id: "q4", kind: "pr", blocking: false, pr: { url: "https://github.com/o/r/pull/1", number: 1 }, preview: { images: ["a.png", "b.png"] } });
     expect(rowMeta(prShots, NOW).map((p) => p.text)).toEqual(["pr", "r", "not merged", "2 images", "5 min"]);
   });
+  it("row meta: an update ticket says where the press is; the press limit in the person's words", () => {
+    const up = (state: "refused" | "running", step?: string) => item({ id: "q1", kind: "deploy", repo: "", area: "", deploy: {
+      live: "", target: "", count: 0, prs: [], more: 0,
+      release: { version: 849, commit: "b".repeat(40), builtAt: "2026-11-26T13:00:00Z", security: false, notes: [], more: 0, running: { version: 848, commit: null } },
+      update: { state, via: "tab", askedAt: NOW - MIN, from: 848, to: 849, ...(step ? { step } : {}) },
+    } });
+    const texts = (i: QueueItem) => rowMeta(i, NOW).map((p) => p.text);
+    expect(texts(up("running"))).toContain("updating");
+    expect(rowMeta(up("refused", "layout"), NOW)).toContainEqual({ text: "refused at the code folder check", warn: true });
+    expect(rowMeta(up("refused", "limit"), NOW)).toContainEqual({ text: "too many presses", warn: true });
+  });
   it("row meta: a snoozed ticket says until when; an ended snooze gives the age again", () => {
     const until = new Date(2026, 10, 10, 13, 0).getTime();
     expect(rowMeta(item({ id: "q1", status: "snoozed", snoozedUntil: until }), NOW).at(-1)).toEqual({ text: "snoozed until 13:00" });

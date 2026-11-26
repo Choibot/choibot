@@ -31,6 +31,7 @@ import { WHY_WORDS, plainLine } from "./cron-result.mjs";
 import { CLI_NAME } from "../../server/brand.js";
 import { envRead, names } from "../../server/names.mjs";
 import { COORDINATOR_ID } from "../../server/coordinator/paths.js";
+import { settingsFile } from "../../server/layout.js";
 
 // The cron subcommands the Coordinator may run: the reads, and the link of a ticket to a run
 // (`note`: the console checks the caller and the ticket; it changes nothing of the task).
@@ -108,6 +109,7 @@ const consoleInstalled = (ctx: Ctx) => existsSync(join(ctx.unitDir, names().unit
 function unitVars(ctx: Ctx): CronUnitVars {
   return {
     REPO_DIR: ctx.repoDir,
+    SETTINGS_FILE: settingsFile(ctx.repoDir),
     NODE_BIN: process.execPath,
     // ~/.local/bin matters: claude and gh live there on typical hosts.
     PATH: buildPath([dirname(process.execPath), join(ctx.homedir(), ".local", "bin")]),

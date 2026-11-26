@@ -7,6 +7,10 @@ import { sortOpen } from "../../server/chief/queue/priority";
 import { isGone, isUndelivered } from "../../server/chief/queue/sections";
 import { fmtClock, fmtDay } from "./thread";
 import { closedAt } from "./threadTickets";
+import { pressLimit, stepWords } from "../../server/chief/deploy/ticket";
+
+// The row word of a press that ended with no update (server/update).
+const UPDATE_ROW_WORD = { "not-started": "not started", unreachable: "release not reachable", "not-finished": "not finished" } as const;
 
 // The Open rows in the order the list shows them: the tickets that block an agent first, then
 // the rest. Inside each part the order is the queue's priority rule (sortOpen: score, then the
@@ -91,12 +95,17 @@ export function whereParts(i: Pick<QueueItem, "repo" | "area">, hasLead: boolean
 
 // The second line of a row: kind · (area) · repo · facts · age. `warn` parts show in amber.
 export function rowMeta(i: QueueItem, now: number, hasLead = false): MetaPart[] {
-  const out: MetaPart[] = [{ text: i.kind }, ...whereParts(i, hasLead)];
+  const out: MetaPart[] = [{ text: i.kind === "deploy" && i.deploy?.release ? "update" : i.kind }, ...whereParts(i, hasLead)];
   if (notMerged(i)) out.push({ text: "not merged", warn: true });
   // The console's own deploy ticket: where its run is.
   const run = i.kind === "deploy" ? i.deploy?.run : undefined;
   if (run?.phase === "running") out.push({ text: `runs: ${run.step}` });
   else if (run?.phase === "failed") out.push({ text: `failed at ${run.step}`, warn: true });
+  // The release variant: where the update is.
+  const up = i.kind === "deploy" ? i.deploy?.update : undefined;
+  if (up?.state === "asked" || up?.state === "running") out.push({ text: "updating" });
+  else if (up?.state === "refused") out.push({ text: pressLimit(up) ? "too many presses" : `refused at ${stepWords(up.step)}`, warn: true });
+  else if (up?.state === "not-started" || up?.state === "unreachable" || up?.state === "not-finished") out.push({ text: UPDATE_ROW_WORD[up.state], warn: true });
   const n = i.kind === "preview" || i.kind === "pr" ? i.preview?.images.length ?? 0 : 0; // a pr ticket may carry screenshots (decision 65)
   if (n > 0) out.push({ text: n === 1 ? "1 image" : `${n} images` });
   if (i.status === "snoozed" && (i.snoozedUntil ?? 0) > now) out.push({ text: `snoozed until ${clockText(i.snoozedUntil ?? 0, now)}` });
@@ -109,10 +118,11 @@ export function kindChip(i: QueueItem, now: number): { text: string; block: bool
   const isOpen = sortOpen([i], now).length === 1;
   if (!isOpen) {
     const state = i.status === "snoozed" ? "snoozed" : i.status !== "withdrawn" ? "answered"
-      : i.kind === "deploy" && i.lastError === "deployed" ? "deployed" : "closed";
+      : i.kind === "deploy" && (i.lastError === "deployed" || i.lastError === "updated") ? i.lastError
+      : i.kind === "deploy" && i.lastError === "update-failed" ? "update failed" : "closed";
     return { text: `${i.kind} · ${state}`, block: false };
   }
-  if (i.kind === "deploy") return { text: "deploy · from the console", block: false };
+  if (i.kind === "deploy") return { text: `${i.deploy?.release ? "update" : "deploy"} · from the console`, block: false };
   if (i.blocking) return { text: `${i.kind} · blocks the agent`, block: true };
   return { text: `${i.kind} · ${i.kind === "pr" || i.kind === "preview" ? "for review" : "not blocking"}`, block: false };
 }

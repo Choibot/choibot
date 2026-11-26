@@ -2,6 +2,7 @@
 # install.sh — the install line of ChoiBot: from a new Linux server to a console that runs.
 #
 #   CHOIBOT_SOURCE=<git address or archive file> sh install.sh
+#   CHOIBOT_RELEASE=<release file> [CHOIBOT_RELEASE_INDEX=<its index.json>] sh install.sh
 #
 # It checks the server, puts ChoiBot and its OWN Node into one folder, gets Claude Code, runs the
 # set-up that asks nothing, and ends with the address and the code for the first device. The
@@ -21,6 +22,16 @@
 #   CHOIBOT_SOURCE  where the code comes from: a git address that this server can reach, or an
 #                   archive file (.tar.gz) on this server. The public address comes with the
 #                   public release; until then there is no default.
+#   CHOIBOT_RELEASE a release of ChoiBot that we built (scripts/release/build.sh, a .tar.gz with
+#                   the code, its packages, its build, its Node and gh): the full path of the file
+#                   on this server. Then there is no download of Node, pnpm or gh, no package
+#                   install and no build. Not with CHOIBOT_SOURCE. Into a new folder only, on
+#                   Ubuntu 24.04 x86-64 only (the system that a release is built for). No root and
+#                   no signature here: a hosted server's root checks the signature first.
+#                   A fresh release install has the release layout: its settings file is
+#                   <folder>/console.env and its data are outside the code folder.
+#   CHOIBOT_RELEASE_INDEX  the release's index.json: then the file's name, size and SHA-256 are
+#                   checked against it before anything is unpacked.
 #   CHOIBOT_HOME    ChoiBot's own folder. Default: ~/choibot.
 #   CHOIBOT_PORT    where the search for a free port starts. Default: 3100.
 #
@@ -78,6 +89,7 @@ shown() { printf '%s' "$1" | sed 's#://[^/@]*@#://#'; }
 
 check_source() {
   ARCHIVE=no
+  if [ -n "$RELEASE" ]; then check_release; return 0; fi
   if [ -f "$APP/package.json" ]; then return 0; fi
   if [ -z "$SOURCE" ]; then
     stop "This script does not know where to get $NAME from." \
@@ -92,6 +104,41 @@ check_source() {
       [ -f "$SOURCE" ] || stop "The archive $(shown "$SOURCE") is not on this server." "Copy it to this server first, and give its full path."
       ;;
   esac
+}
+
+# One field of a release's index.json, as the release builder writes it (scripts/release/release.mjs:
+# two spaces, the key, its value, a comma). Strings lose their quotes. Nothing when it is not there
+# exactly one time. No code of the release runs before this check.
+index_field() {
+  if_v=$(sed -n "s/^  \"$1\": \(.*\),\$/\1/p" "$RELEASE_INDEX")
+  [ "$(printf '%s\n' "$if_v" | grep -c .)" = 1 ] || return 0
+  printf '%s' "$if_v" | sed 's/^"\(.*\)"$/\1/'
+}
+
+# A release file (CHOIBOT_RELEASE): its place, this server's system, and its index when one is given.
+check_release() {
+  [ -z "$SOURCE" ] || stop "Give CHOIBOT_RELEASE or CHOIBOT_SOURCE, not both."
+  case $RELEASE in /*) ;; *) stop "CHOIBOT_RELEASE must be the full path of the release file (it starts with /)." ;; esac
+  [ -f "$RELEASE" ] || stop "The release file $RELEASE is not on this server." "Copy it to this server first, and give its full path."
+  # The system a release is built for (release-format.md: arch x86_64, os ubuntu-24.04): its Node
+  # packages are built there. Read in a subshell: the file sets NAME and VERSION.
+  cr_os=$(. /etc/os-release 2>/dev/null && printf '%s-%s' "${ID:-}" "${VERSION_ID:-}") || true
+  if [ "$(uname -m)" != x86_64 ] || [ "$cr_os" != ubuntu-24.04 ]; then
+    stop "A release of $NAME is built for Ubuntu 24.04 on x86-64. This server is ${cr_os:-another system} on $(uname -m)." \
+      "On this server, install from the code: CHOIBOT_SOURCE=<git address or archive file> sh install.sh"
+  fi
+  if [ -n "$RELEASE_INDEX" ]; then
+    case $RELEASE_INDEX in /*) ;; *) stop "CHOIBOT_RELEASE_INDEX must be the full path of the index (it starts with /)." ;; esac
+    [ -f "$RELEASE_INDEX" ] || stop "The index $RELEASE_INDEX is not on this server."
+    cr_file=$(index_field file) cr_size=$(index_field size) cr_sha=$(index_field sha256)
+    cr_arch=$(index_field arch) cr_ios=$(index_field os)
+    if [ -z "$cr_file" ] || [ -z "$cr_size" ] || [ -z "$cr_sha" ]; then stop "The index $RELEASE_INDEX is not the index of a release of $NAME."; fi
+    [ "$cr_file" = "$(basename "$RELEASE")" ] || stop "The index is of $cr_file, not of $(basename "$RELEASE")."
+    [ "$cr_arch" = x86_64 ] && [ "$cr_ios" = ubuntu-24.04 ] || stop "The index is of a release for $cr_ios on $cr_arch, not for this server."
+    [ "$(wc -c <"$RELEASE" | tr -d ' ')" = "$cr_size" ] || stop "The release file is not the size that its index says. It is cut or another file." "Download it again."
+    [ "$(sha256sum "$RELEASE" | cut -d' ' -f1)" = "$cr_sha" ] || stop "The release file is not the file of its index: its SHA-256 differs." "Download it again. Nothing of it ran."
+    ok "The release file matches its index (name, size and SHA-256)"
+  fi
 }
 
 check_system() {
@@ -205,7 +252,7 @@ check_services() {
 # The tools that this script and ChoiBot need and that are not on the server.
 missing_tools() {
   mt_out=
-  for mt_tool in curl git tar gzip sha256sum bash dtach make g++ python3; do
+  for mt_tool in curl git tar gzip sha256sum bash dtach $BUILD_TOOLS; do
     command -v "$mt_tool" >/dev/null 2>&1 || mt_out="$mt_out $mt_tool"
   done
   printf '%s' "${mt_out# }"
@@ -355,6 +402,98 @@ get_code() {
   fi
 }
 
+# The Node, pnpm and gh of a release in folder $1 run here, and are the versions of the pins.
+release_parts_run() {
+  [ "$("$1/node/bin/node" -v 2>/dev/null)" = "v$NODE_VERSION" ] || { rm -rf "$BASE/.release-new"; stop "The Node of the release is not Node $NODE_VERSION."; }
+  [ "$(PATH="$1/node/bin:$PATH" "$1/node/bin/pnpm" --version 2>/dev/null)" = "$PNPM_VERSION" ] || { rm -rf "$BASE/.release-new"; stop "The pnpm of the release is not pnpm $PNPM_VERSION."; }
+  "$1/gh/bin/gh" --version >/dev/null 2>&1 || { rm -rf "$BASE/.release-new"; stop "The GitHub tool of the release does not run on this server."; }
+}
+
+# A release (CHOIBOT_RELEASE): unpacked into a new folder of the install, checked by the same code
+# as the release builder's (release.mjs `installable`: the entry rules, release.json, the build of
+# its commit, the parts, this script's own pins), then put in place. No download, no build.
+get_release() {
+  gr_new=$BASE/.release-new
+  if [ -f "$APP/release.json" ]; then
+    # A second run: the same release is there (every step can run again), else a stop.
+    gr_want=$(tar -xzOf "$RELEASE" app/release.json 2>>"$LOG") || stop "The release file cannot be read." "It must be a release of $NAME (a .tar.gz)."
+    if [ "$gr_want" != "$(cat "$APP/release.json")" ]; then
+      stop "$BASE holds another version of $NAME. A release goes into a new folder." \
+        "Give a new folder:  CHOIBOT_HOME=<new folder> CHOIBOT_RELEASE=$RELEASE sh install.sh"
+    fi
+    # The same release. A run that was cut between its renames (or a part removed later) is
+    # finished: the part comes from the unpacked folder when it is still there, else from the same
+    # release file. app/ is never touched again: after the set-up it holds the settings and data.
+    gr_done=
+    for gr_part in node gh; do
+      if [ "$gr_part" = node ]; then gr_to=$NODE_DIR; else gr_to=$BASE/gh; fi
+      [ ! -e "$gr_to" ] || continue
+      if [ ! -d "$gr_new/$gr_part" ]; then
+        rm -rf "$gr_new"
+        mkdir "$gr_new"
+        if ! (umask 022 && tar -xzf "$RELEASE" -C "$gr_new" --no-same-owner --no-same-permissions "$gr_part") 2>>"$LOG"; then
+          rm -rf "$gr_new"
+          stop "$gr_to is missing, and the release file could not give it back." "Give the same release file again. The log: $LOG"
+        fi
+      fi
+      mv "$gr_new/$gr_part" "$gr_to"
+      gr_done="$gr_done $gr_part/"
+    done
+    rm -rf "$gr_new"
+    if [ -n "$gr_done" ]; then release_parts_run "$BASE"; fi
+    if ! node_ready; then stop "The Node of this install ($NODE_DIR) is not Node $NODE_VERSION." "Remove $NODE_DIR and paste the install line again: it comes back from the release file."; fi
+    if [ -n "$gr_done" ]; then ok "The install of this release was not finished: it is now (${gr_done# } from the release)."
+    else ok "This release of $NAME is on your server. Nothing to unpack."; fi
+    return 0
+  fi
+  for gr_part in "$APP" "$NODE_DIR" "$BASE/gh"; do
+    if [ -e "$gr_part" ]; then
+      stop "$gr_part is there already. A release goes into a new folder." \
+        "Give a new folder:  CHOIBOT_HOME=<new folder> CHOIBOT_RELEASE=$RELEASE sh install.sh"
+    fi
+  done
+  rm -rf "$gr_new"
+  mkdir "$gr_new"
+  say "    Unpacking the release. This takes a minute."
+  if ! (umask 022 && tar -xzf "$RELEASE" -C "$gr_new" --no-same-owner --no-same-permissions) 2>>"$LOG"; then
+    rm -rf "$gr_new"
+    stop "The release file could not be unpacked." "It must be a release of $NAME (a .tar.gz). The log: $LOG"
+  fi
+  if [ ! -x "$gr_new/node/bin/node" ] || [ ! -f "$gr_new/app/scripts/release/release.mjs" ]; then
+    rm -rf "$gr_new"
+    stop "This file is not a release of $NAME (it has no node/bin/node or app/scripts/release/release.mjs)."
+  fi
+  if ! gr_out=$("$gr_new/node/bin/node" "$gr_new/app/scripts/release/release.mjs" installable "$gr_new" "$NODE_VERSION" "$PNPM_VERSION" "$GH_VERSION" 2>>"$LOG"); then
+    log_tail
+    rm -rf "$gr_new"
+    stop "This release cannot be installed: the line above says why."
+  fi
+  gr_version=${gr_out%% *}
+  gr_commit=${gr_out#* }
+  gr_commit=${gr_commit%% *}
+  release_parts_run "$gr_new"
+  mv "$gr_new/app" "$APP"
+  mv "$gr_new/node" "$NODE_DIR"
+  mv "$gr_new/gh" "$BASE/gh"
+  rmdir "$gr_new"
+  ok "$NAME $gr_version ($(printf '%.7s' "$gr_commit")), from the release file. No download and no build."
+}
+
+# A fresh install from a release has the release layout (server/layout.ts): the code folder holds
+# code only, so a release can replace it whole. The settings file is outside it, $BASE/console.env
+# (0600), and its being there is the mark of the layout: the set-up writes into it, the units read
+# it, and the data folders follow (the records in the data folder, the widgets in $BASE/widgets).
+# An install of the folder layout (a release from before, with its app/.env) stays as it is.
+release_layout() {
+  if [ -e "$BASE/console.env" ]; then return 0; fi
+  if [ -e "$APP/.env" ]; then
+    note "This install keeps its settings in $APP/.env (an install from before the release layout)."
+    return 0
+  fi
+  (umask 077 && : >"$BASE/console.env")
+  ok "The settings file: $BASE/console.env (the code folder holds code only)"
+}
+
 # The command of ChoiBot for this install: its own Node first, and from its own folder. The
 # file is written new at each run, so it is always the one of this script.
 write_command() {
@@ -433,6 +572,18 @@ get_gh() {
     ok "The GitHub tool (gh) is on your server"
     return 0
   fi
+  # A release brings its own gh (in $BASE/gh): only the name on the PATH is made.
+  if [ -n "$RELEASE" ] && [ -x "$BASE/gh/bin/gh" ]; then
+    gg_link="$HOME/.local/bin/gh"
+    if [ -e "$gg_link" ] && [ ! -L "$gg_link" ]; then
+      note "The GitHub tool at $gg_link is too old for $NAME, and it is a file of yours, so it is not replaced."
+      return 0
+    fi
+    ln -sf "$BASE/gh/bin/gh" "$gg_link"
+    hash -r 2>/dev/null || true
+    ok "The GitHub tool (gh $GH_VERSION), from the release"
+    return 0
+  fi
   gg_old=no
   if command -v gh >/dev/null 2>&1; then gg_old=yes; fi
   # The name on the PATH of the user: never over a file of the person.
@@ -473,6 +624,10 @@ set_up() {
 main() {
   START=$(date +%s)
   SOURCE=${CHOIBOT_SOURCE:-}
+  RELEASE=${CHOIBOT_RELEASE:-}
+  RELEASE_INDEX=${CHOIBOT_RELEASE_INDEX:-}
+  # A release is built: its server needs no build tools.
+  if [ -n "$RELEASE" ]; then BUILD_TOOLS=; else BUILD_TOOLS="make g++ python3"; fi
   BASE=${CHOIBOT_HOME:-$HOME/$CLI}
   APP=$BASE/app
   NODE_DIR=$BASE/node
@@ -498,8 +653,7 @@ main() {
   STEP=Download
   own_folder
   trap 'rm -rf "$TMP"' EXIT
-  get_node
-  get_code
+  if [ -n "$RELEASE" ]; then get_release; release_layout; else get_node; get_code; fi
   write_command
   get_gh
   get_claude

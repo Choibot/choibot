@@ -73,6 +73,8 @@
 .rowT { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .rowT b { flex: 1; min-width: 0; font-weight: var(--weight-medium); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .row[data-done] .rowT b { color: var(--ink-1); }
+/* The result of a deploy or an update: its whole line ("… Nothing lost." must not be cut). */
+.rowT b.whole { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
 .tick { display: grid; color: var(--ink-2); }
 .star { flex: none; display: grid; color: var(--ink-2); }
 .rowM, .meta { min-width: 0; font: var(--weight-regular) var(--text-xs)/1.45 var(--font-sans); color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }

@@ -22,6 +22,7 @@ import { cli } from "../../server/setup/steps.js";
 import { parseEnv, writeEnvFile } from "./env.js";
 import { run } from "./exec.js";
 import { installEnv } from "./pair.js";
+import { settingsFile } from "../../server/layout.js";
 
 // An address that only works inside one network (a cloud server often sees itself under one).
 const PRIVATE_IP = /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.(6[4-9]|[7-9]\d|1[01]\d|12[0-7])\.|169\.254\.|f[cd][0-9a-f]{2}:|fe80:)/i;
@@ -111,7 +112,7 @@ export async function runAccess(d: AccessDeps): Promise<number> {
 // in its settings. A set-up with no question wrote the address of the server itself there:
 // only that value is replaced, and the console's own service starts again with the new one.
 async function useAddress(d: AccessDeps, env: Env, port: string, address: string, out: (s: string) => void): Promise<void> {
-  const file = join(d.repoDir, ".env");
+  const file = settingsFile(d.repoDir);
   if (!existsSync(file)) return;
   const values = parseEnv(readFileSync(file, "utf8"));
   if (values.get("CHIEF_CONSOLE_URL") !== `http://127.0.0.1:${port}`) return;

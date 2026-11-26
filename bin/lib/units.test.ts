@@ -5,7 +5,7 @@ import { CONSOLE_UNIT_TEMPLATE, renderUnit, buildPath, unitTemplate, UNIT_NAMES,
 import { NEW_NAMES, OLD_NAMES } from "../../server/names.mjs";
 
 const VARS: UnitVars = {
-  REPO_DIR: "/home/alice/choibot", PNPM_BIN: "/home/alice/.local/share/pnpm/bin/pnpm",
+  REPO_DIR: "/home/alice/choibot", SETTINGS_FILE: "/home/alice/choibot/.env", PNPM_BIN: "/home/alice/.local/share/pnpm/bin/pnpm",
   PATH: "/home/alice/nodebin:/usr/local/bin:/usr/bin:/bin",
 };
 const tmpl = (n: string) => readFileSync(new URL(`../../deploy/${n}`, import.meta.url), "utf8");
@@ -20,6 +20,9 @@ describe("unit templates", () => {
       // A renderer that deleted placeholders instead of replacing them would
       // still satisfy the assertions above — pin the real substitution.
       expect(out).toContain(VARS.REPO_DIR);
+      // The settings file of the install (server/layout.ts): the unit reads it, wherever it is.
+      expect(out).toContain(`EnvironmentFile=${VARS.SETTINGS_FILE}`);
+      expect(renderUnit(tmpl(name), { ...VARS, SETTINGS_FILE: "/opt/choibot/console.env" })).toContain("EnvironmentFile=/opt/choibot/console.env");
     });
   }
   // Each template renders as the file is: the templates carry the names of the table.

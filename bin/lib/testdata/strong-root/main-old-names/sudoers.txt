@@ -1,0 +1,6 @@
+# /etc/sudoers.d/choibot-agent-exec — written by `strong-setup` of ChoiBot. The console runs its agents through
+# the exec helper as the agent account; only these env keys reach the helper.
+choibot ALL=(choibot-agent) NOPASSWD: /usr/local/bin/choibot-agent-exec
+# The second account: the fleet master, the leads and the Coordinator.
+choibot ALL=(choibot-chief) NOPASSWD: /usr/local/bin/choibot-agent-exec
+Defaults!/usr/local/bin/choibot-agent-exec env_keep += "CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS PORT CLAUDE_CONFIG_DIR CODEX_HOME TERM LANG CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL CRON_DATA_DIR TZ CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL"

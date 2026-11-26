@@ -1,0 +1,10 @@
+# /etc/choibot-agent-exec.conf — written by `strong-setup` of ChoiBot (see deploy/choibot-agent-exec.conf.example).
+DTACH_DIR=/run/choibot-dtach
+DTACH_BIN=/usr/local/lib/choibot/bin/dtach
+WORKTREE_ROOT=/srv/choibot/workspace
+WORKSPACE_DIR=/srv/choibot/workspace
+AGENT_HOME_ROOT=/srv/choibot/agent-homes
+AGENT_PATH=/usr/local/lib/choibot/bin:/usr/local/lib/choibot/node/bin:/usr/local/bin:/usr/bin:/bin
+AGENT_UID=<uid of the agent account>
+CHIEF_UID=<uid of the second account>
+CHIEF_DTACH_DIR=/run/choibot-dtach-chief

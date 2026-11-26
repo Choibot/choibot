@@ -3,7 +3,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DISPLAY_NAME } from "../../server/brand.js";
 import { names, OLD_NAMES, type Names } from "../../server/names.mjs";
-export type UnitVars = { REPO_DIR: string; PNPM_BIN: string; PATH: string };
+// SETTINGS_FILE: the settings file of the install (server/layout.ts settingsFile).
+export type UnitVars = { REPO_DIR: string; SETTINGS_FILE: string; PNPM_BIN: string; PATH: string };
 // The unit the console runs in: choibot.service, or choibot.service on an install with
 // the old names.
 export const UNIT_NAMES: readonly string[] = [names().unit];

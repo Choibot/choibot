@@ -1,0 +1,10 @@
+{
+  "user": "choibot", "uid": 1000, "home": "/home/choibot", "legacy": false,
+  "app": "/opt/choibot/app", "envFile": "/opt/choibot/console.env",
+  "privateDirs": ["/home/choibot/.local/share/choibot", "/home/choibot/.local/share/choibot/agents", "/home/choibot/.local/share/choibot/services"],
+  "privateFiles": ["/opt/choibot/install.log"],
+  "widgetsDir": "/opt/choibot/widgets", "workspace": "/srv/choibot/workspace", "worktreeRoot": null,
+  "agentDataDir": "/home/choibot/.local/share/choibot/agents", "claudeDir": "/home/choibot/.claude",
+  "nodeDir": "/opt/choibot/node", "claude": "/home/choibot/.local/share/claude/versions/2.1.400", "gh": "/opt/choibot/gh/bin/gh", "dtach": "/usr/bin/dtach",
+  "unit": "choibot.service", "persistent": [{ "id": "lead-console", "cwd": "/srv/choibot/agent-homes/chief/leads/console/agent" }]
+}

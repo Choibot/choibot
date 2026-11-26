@@ -4,7 +4,7 @@
 //
 // This module must stay free of TOP-LEVEL SIDE EFFECTS (no prompts, no exec, no
 // process.exit): steps.test.ts imports it without mocking ./exec.js.
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join } from "node:path";
@@ -20,6 +20,8 @@ import { checkoutInWorkspace, defaultWorkspaceDir } from "./layout.js";
 import { CLI_NAME, DISPLAY_NAME } from "../../server/brand.js";
 import { NO_CHECK_SWITCH } from "../../server/buildcheck.mjs";
 import { cli, stepOf, type Probes } from "../../server/setup/steps.js";
+import { installKind, versionInfo } from "../../server/release.js";
+import { settingsFile } from "../../server/layout.js";
 
 // ---------------------------------------------------------------- pure helpers
 
@@ -170,6 +172,7 @@ function unitDirPath(): string {
 function unitVars(repoDir: string, pnpmBin: string): UnitVars {
   return {
     REPO_DIR: repoDir,
+    SETTINGS_FILE: settingsFile(repoDir),
     PNPM_BIN: pnpmBin,
     // ~/.local/bin matters: gh, claude and dtach live there on typical hosts.
     PATH: buildPath([dirname(process.execPath), dirname(pnpmBin), join(homedir(), ".local", "bin")]),
@@ -327,8 +330,11 @@ async function setupSteps({ repoDir, auto }: { repoDir: string; auto?: AutoOpts 
 
   // 2. .env ------------------------------------------------------------------
   at.step = ".env";
-  const envPath = join(repoDir, ".env");
-  const existed = existsSync(envPath);
+  const envPath = settingsFile(repoDir);
+  // An empty file holds no setting: it is a new one. The release layout's install makes its
+  // settings file empty before the set-up (install.sh release_layout), so that this set-up writes
+  // there; it must get the settings of a new install (the Queue on), not those of an old one.
+  const existed = existsSync(envPath) && statSync(envPath).size > 0;
   const values = existed ? parseEnv(readFileSync(envPath, "utf8")) : new Map<string, string>();
   const schema = new Map(ENV_SCHEMA.map((k) => [k.key, k]));
   const needs = (key: string): boolean => {
@@ -488,8 +494,14 @@ async function setupSteps({ repoDir, auto }: { repoDir: string; auto?: AutoOpts 
   // running console breaks it; `update` is the command for new code).
   const consoleRuns = auto !== undefined && existsSync(join(repoDir, ".next", "BUILD_ID"))
     && (await run("systemctl", ["--user", "is-active", "--quiet", UNIT_NAMES[0]])).code === 0;
+  // A release (install.sh CHOIBOT_RELEASE) holds its packages and its build: never a new one
+  // (that would need the network and the build tools that a release server does not have).
+  const own = versionInfo(repoDir);
+  const releaseBuilt = own.kind === "release" && own.version !== null && own.problem === undefined;
   if (consoleRuns) {
     say(`${DISPLAY_NAME} is built and runs. No new build.`);
+  } else if (releaseBuilt) {
+    say(`${DISPLAY_NAME} ${own.version} is a release: it is built. No build.`);
   } else if (auto) {
     // The build output is long and technical: shown only when the build fails.
     console.log(`${pad}  Building. This takes a few minutes.`);
@@ -572,7 +584,7 @@ async function setupSteps({ repoDir, auto }: { repoDir: string; auto?: AutoOpts 
   // `enable --now` is a no-op START on a unit that is already active: on a
   // re-run the corrected .env and the re-rendered units would silently not take
   // effect. Restart exactly the already-running units the change touches — the
-  // unit reads REPO_DIR/.env, so an .env edit counts too.
+  // unit reads the settings file (SETTINGS_FILE), so an edit of it counts too.
   const reasons: string[] = [];
   if (changedUnits.length > 0) reasons.push(`unit file changed (${changedUnits.join(", ")})`);
   if (added.length > 0) reasons.push(`.env updated (${added.join(", ")})`);
@@ -667,7 +679,7 @@ async function optionalGroup(
 // agent uses it). The address of the server itself that a set-up with no question wrote follows
 // the port; an address that a person set is kept. The console reads the port at its next start.
 export async function runPort(repoDir: string, value: string | undefined, isFree: (port: number) => Promise<boolean> = probePort): Promise<number> {
-  const envPath = join(repoDir, ".env");
+  const envPath = settingsFile(repoDir);
   const n = Number(value);
   if (!/^\d{4,5}$/.test(value ?? "") || n < 1024 || n > 65535) { console.error("✖ Give a port from 1024 to 65535."); return 1; }
   if (!existsSync(envPath)) { console.error(`✖ ${DISPLAY_NAME} has no settings yet. First: ${cli("setup --auto")}`); return 1; }
@@ -762,6 +774,11 @@ async function refreshUnits(repoDir: string): Promise<void> {
 
 // git pull → install → build → refresh units → restart the console.
 export async function runUpdate(repoDir: string): Promise<number> {
+  // A release gets new code as a release (the Update ticket of a hosted console), never by git.
+  if (installKind(repoDir) === "release") {
+    console.error(`✖ This ${DISPLAY_NAME} runs a release. \`update\` gets new code from git only; a new release comes from its release file.`);
+    return 1;
+  }
   // An install from an archive file (install.sh) has no git history: there is nothing to pull.
   if (!existsSync(join(repoDir, ".git"))) {
     console.error(`✖ This install of ${DISPLAY_NAME} came from an archive file, not from git. \`update\` cannot get new code for it.`);

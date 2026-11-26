@@ -4,7 +4,7 @@
 // fake terminals: no PTY spawns, no request leaves the test app.
 import Fastify, { type FastifyInstance } from "fastify";
 import { execFileSync } from "node:child_process";
-import { link, mkdir, mkdtemp, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { link, mkdir, mkdtemp, realpath, rm, symlink, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeAll, afterAll, beforeEach, describe, expect, it, vi } from "vitest";
@@ -392,6 +392,17 @@ describe("hardened: the files API keeps the console checkout and .env files from
     expect((await content(join(wt, ".env"))).statusCode).toBe(403);
     expect((await content(join(repo, "a.ts"))).statusCode).toBe(200);
     expect((await content(join(repo, ".env.local"), user)).statusCode).toBe(200);
+  });
+
+  it("the settings file of a release layout (console.env) anywhere: 403 headerless; USER reads it", async () => {
+    // Its own file, removed at the end: the later cases search this folder.
+    await writeFile(join(repo, "console.env"), "CONSOLE_COOKIE_SECRET=s3cret\n");
+    try {
+      expect((await content(join(repo, "console.env"))).statusCode).toBe(403);
+      expect((await content(join(repo, "console.env"), user)).statusCode).toBe(200);
+    } finally {
+      await unlink(join(repo, "console.env"));
+    }
   });
 
   it("HEAD and a repeated path param are refused too", async () => {

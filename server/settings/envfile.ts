@@ -12,6 +12,7 @@ import { constants } from "node:fs";
 import { lstat, open, readFile, rename, unlink } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { SHARE_TOOL_RE } from "../chief/queue/shareTool.js";
+import { settingsFile } from "../layout.js";
 
 // The only keys the server may write.
 export const WRITABLE_KEYS = [
@@ -188,7 +189,7 @@ export const readEnvText = (path: string): Promise<string> => readFile(path, "ut
 // reads at start for the writable keys only, as systemd reads the live one (loadTestEnvFile).
 export function envFilePath(env: Record<string, string | undefined>, cwd: string): string {
   const t = env.CHIEF_TEST === "1" ? (env.CHIEF_TEST_ENV_FILE ?? "").trim() : "";
-  return t.startsWith("/") ? t : join(cwd, ".env");
+  return t.startsWith("/") ? t : settingsFile(cwd);
 }
 
 export async function loadTestEnvFile(env: Record<string, string | undefined>): Promise<void> {

@@ -39,11 +39,15 @@ export function stepStates(run: Pick<DeployRun, "step" | "phase" | "skipped">): 
 // How long a deployed ticket stays in the Queue view after it closed.
 export const DEPLOYED_SHOWN_MS = 60 * 60_000;
 
-// The newest deploy ticket that closed as deployed a short time ago: the Queue view shows its result.
+// The ends whose result the Queue view shows for a while: a deploy that was done, an update that
+// was done or failed (server/update).
+const SHOWN_ENDS = new Set<string>([DEPLOY_CLOSED.deployed, DEPLOY_CLOSED.updated, DEPLOY_CLOSED.updateFailed]);
+
+// The newest deploy or update ticket that ended a short time ago: the Queue view shows its result.
 export function recentDeployed(items: QueueItem[], now: number): QueueItem | null {
   let best: QueueItem | null = null;
   for (const i of items) {
-    if (i.kind !== "deploy" || i.status !== "withdrawn" || i.lastError !== DEPLOY_CLOSED.deployed || i.closedAt === undefined) continue;
+    if (i.kind !== "deploy" || i.status !== "withdrawn" || !SHOWN_ENDS.has(i.lastError ?? "") || i.closedAt === undefined) continue;
     if (now - i.closedAt > DEPLOYED_SHOWN_MS) continue;
     if (!best || i.closedAt > (best.closedAt ?? 0)) best = i;
   }

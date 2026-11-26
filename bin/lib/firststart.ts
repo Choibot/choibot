@@ -29,6 +29,7 @@ import { firstRunOn } from "../../server/chief/firstrun.js";
 import { chiefActive, chiefPaths, chiefUserAuth, resolveChiefDataDir, type Env } from "../../server/chief/paths.js";
 import { envRead } from "../../server/names.mjs";
 import { generateSecret, parseEnv, writeEnvFile } from "./env.js";
+import { settingsFile } from "../../server/layout.js";
 
 // The address of a console behind the door: https, a host name, an optional port. No path.
 export const CONSOLE_URL_RE = /^https:\/\/[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+(?::[0-9]{1,5})?$/;
@@ -68,7 +69,7 @@ export async function runFirstStart(d: FirstStartDeps): Promise<number> {
   const shell = d.env ?? process.env;
   // A mistake guard, not a wall: the first-boot step runs this, never an agent.
   if (envRead(shell, "AGENT_ID") !== undefined || shell.CLAUDECODE !== undefined) { err("first-start runs at the first boot of a server, not in an agent's shell."); return 1; }
-  const envFile = join(d.repoDir, ".env");
+  const envFile = settingsFile(d.repoDir);
   if (!existsSync(envFile)) { err(`✖ ${DISPLAY_NAME} has no settings here (${envFile}).`); return 1; }
   const values = parseEnv(readFileSync(envFile, "utf8"));
   const env: Env = { ...shell, ...Object.fromEntries(values) };

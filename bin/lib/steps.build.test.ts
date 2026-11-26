@@ -2,7 +2,7 @@
 // update) turns Next's own type check and lint off with the switch of server/buildcheck.mjs, in
 // the env of that one child only. The exec seam is mocked (nothing is spawned, no service is
 // touched); HOME and the console's folder are temp dirs.
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +35,7 @@ vi.mock("./cron.js", () => ({ cronSync: async () => {} }));
 
 import { NO_CHECK_SWITCH } from "../../server/buildcheck.mjs";
 import { parseEnv } from "./env.js";
+import { settingsFile } from "../../server/layout.js";
 import { freePort, runSetup, runUpdate } from "./steps.js";
 import { UNIT_NAMES } from "./units.js";
 
@@ -55,7 +56,7 @@ beforeEach(() => {
   servers = [];
   box.onStart = () => {
     if (servers.length > 0) return;
-    const port = Number(parseEnv(readFileSync(join(repo, ".env"), "utf8")).get("PORT"));
+    const port = Number(parseEnv(readFileSync(settingsFile(repo), "utf8")).get("PORT"));
     servers.push(createServer((_req, res) => res.end("ok")).listen(port, "127.0.0.1"));
   };
   vi.spyOn(console, "log").mockImplementation(() => {});
@@ -109,5 +110,49 @@ describe("the build of an install turns Next's check off, in the build's env onl
     }
     expect(box.calls.map((c) => c.line).slice(0, 3)).toEqual(["git pull --ff-only", "pnpm install", "pnpm build"]);
     expectSwitchOnBuildOnly();
+  });
+});
+
+// A release (install.sh CHOIBOT_RELEASE): its packages and its build are in it.
+describe("a release is never built again", () => {
+  const COMMIT = "c".repeat(40);
+  const release = (buildId: string) => {
+    writeFileSync(join(repo, "release.json"), JSON.stringify({ v: 1, version: 849, commit: COMMIT, channel: "test", builtAt: "2026-11-26T13:20:00Z", node: "24.22.3", pnpm: "10.34.9", gh: "2.105.0" }));
+    mkdirSync(join(repo, ".next"), { recursive: true });
+    writeFileSync(join(repo, ".next", "BUILD_ID"), buildId);
+  };
+
+  it("setup --auto: no pnpm install and no pnpm build, and the service starts", async () => {
+    release(COMMIT);
+    expect(await runSetup({ repoDir: repo, auto: { port: await aFreePort() } })).toBe(0);
+    const lines = box.calls.map((c) => c.line);
+    expect(lines.filter((l) => l.startsWith("pnpm "))).toEqual([]);
+    expect(lines.some((l) => l.includes("enable --now"))).toBe(true);
+  });
+
+  it("a release whose build is not its commit is built (it is broken, not a release to trust)", async () => {
+    release("f".repeat(40));
+    expect(await runSetup({ repoDir: repo, auto: { port: await aFreePort() } })).toBe(0);
+    expect(box.calls.map((c) => c.line)).toContain("pnpm build");
+  });
+
+  it("a fresh install of the release layout: the set-up writes a new install's settings into console.env, outside the code folder", async () => {
+    release(COMMIT);
+    // install.sh release_layout: an empty settings file next to the code folder.
+    writeFileSync(join(root, "console.env"), "", { mode: 0o600 });
+    expect(await runSetup({ repoDir: repo, auto: { port: await aFreePort() } })).toBe(0);
+    const written = parseEnv(readFileSync(join(root, "console.env"), "utf8"));
+    expect(written.get("CHIEF_ENABLED")).toBe("1");
+    expect(written.has("AGENT_ENV_PASS")).toBe(true);
+    expect(existsSync(join(repo, ".env"))).toBe(false);
+    const unit = readFileSync(join(root, "home", ".config", "systemd", "user", UNIT_NAMES[0]), "utf8");
+    expect(unit).toContain(`EnvironmentFile=${join(root, "console.env")}`);
+    expect(box.calls.map((c) => c.line).filter((l) => l.startsWith("pnpm "))).toEqual([]);
+  });
+
+  it("update refuses a release: new code comes as a release", async () => {
+    release(COMMIT);
+    expect(await runUpdate(repo)).toBe(1);
+    expect(box.calls).toEqual([]);
   });
 });

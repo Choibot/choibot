@@ -23,6 +23,7 @@ import {
 import { agentHomeRoot } from "../../server/chief/homes.js";
 import { chiefFacts, chiefWanted } from "../../server/chief/chiefaccount.js";
 import { checkRepoProtection } from "../../server/agents/git.js";
+import { settingsFile } from "../../server/layout.js";
 
 export type CheckResult = { name: string; ok: boolean; required: boolean; detail: string; hint?: string };
 
@@ -44,7 +45,7 @@ async function checkBin(bin: string, hint: string): Promise<CheckOutcome> {
 }
 
 function readDotEnv(repoDir: string): Map<string, string> {
-  const path = join(repoDir, ".env");
+  const path = settingsFile(repoDir);
   return existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : new Map();
 }
 
@@ -98,7 +99,7 @@ function hardenedReport(env: Record<string, string>, repoDir: string, procRoot =
   const cronDir = resolveCronDataDir(env);
   const homes = agentHomeRoot(env);
   const facts: HardenedFacts = {
-    dataDir: resolveChiefDataDir(env), cronDir, envFile: join(repoDir, ".env"), homeRoot: homes,
+    dataDir: resolveChiefDataDir(env), cronDir, envFile: settingsFile(repoDir), homeRoot: homes,
     selfUid, agentUid: parseAgentUid(env.CHIEF_AGENT_UID),
     // The server's default (server/agents/terminal.ts DTACH_DIR).
     dtachDir: env.AGENT_DTACH_DIR ?? join(tmpdir(), names().dtachDir),
@@ -232,7 +233,7 @@ function checks(repoDir: string, opts: DoctorOpts): Check[] {
       name: ".env",
       required: true,
       check: async () => {
-        const path = join(repoDir, ".env");
+        const path = settingsFile(repoDir);
         const hint = `run \`pnpm ${CLI_NAME} setup\``;
         if (!opts.env && !existsSync(path)) return { ok: false, detail: `not found at ${path}`, hint };
         const values = dotEnv();
