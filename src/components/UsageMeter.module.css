@@ -1,0 +1,142 @@
+/* Vertical usage section, pinned under the Changes list in the right rail. */
+.strip {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-1);
+}
+
+/* Matches the rail's section headers (e.g. "CHANGES"). */
+.head {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-2);
+}
+
+/* Header-as-fold-toggle variant: same look, whole line clickable. */
+.headBtn {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  background: transparent;
+  border: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-2);
+  transition: color 0.12s;
+}
+@media (hover: hover) { .headBtn:hover { color: var(--ink-0); } }
+.caret { flex: none; width: 10px; display: grid; place-items: center; color: var(--ink-2); }
+
+.meter { display: flex; flex-direction: column; gap: 4px; }
+.row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.label {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pct { flex: none; font-family: var(--font-sans); font-size: var(--text-xs); color: var(--ink-0); }
+
+.track {
+  height: 4px;
+  border-radius: 0;
+  background: var(--bg-3);
+  overflow: hidden;
+}
+.fill {
+  height: 100%;
+  border-radius: 0;
+  background: var(--inv);
+  transition: width 0.4s ease;
+}
+.reset { display: flex; align-items: center; gap: 4px; font-family: var(--font-sans); font-size: var(--text-xs); color: var(--ink-2); }
+
+/* Severity drives the fill + percent color; the class sits on .meter. */
+.warning .fill { background: var(--warn); }
+.warning .pct { color: var(--warn); }
+.critical .fill { background: var(--err); }
+.critical .pct { color: var(--err); }
+
+/* The currently-binding window gets a touch more weight. */
+.active .label { color: var(--ink-0); font-weight: var(--weight-semibold); }
+
+.muted { font-family: var(--font-sans); font-size: var(--text-xs); color: var(--ink-2); }
+
+/* One bucket per Claude login once the box has several; the login's name sits
+   above its meters in the same muted mono as the meter labels, so it reads as
+   a sub-heading of Usage rather than a new section. */
+.group { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.account {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Footer form (the sidebar, the home list of the phone): one line per login ── */
+/* One grid for the block: the name, bar and percent columns line up over the lines. */
+.foot {
+  display: grid;
+  grid-template-columns: minmax(0, max-content) minmax(24px, 1fr) auto;
+  gap: 6px 8px;
+  min-width: 0;
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: 16px;
+}
+.fRow {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: subgrid;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.fRow:focus-visible, .fMore:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 2px; }
+.fName { max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.12s; }
+.fTrack { height: 3px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.fFill { display: block; height: 100%; border-radius: 2px; background: var(--ink-1); transition: width 0.4s ease; }
+.fPct { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+/* The state is a colour, not a word: close to the limit, at the limit. */
+.close .fFill { background: var(--warn); }
+.close .fPct { color: var(--warn); }
+.limit .fFill { background: var(--err); }
+.limit .fPct { color: var(--err); }
+.fMore {
+  grid-column: 1 / -1;
+  justify-self: start;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--ink-2);
+  font: inherit;
+  cursor: pointer;
+  transition: color 0.12s;
+}
+@media (hover: hover) {
+  .fRow:hover .fName, .fMore:hover { color: var(--ink-0); }
+}
+.fNone { font-family: var(--font-sans); font-size: var(--text-xs); color: var(--ink-2); }

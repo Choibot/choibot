@@ -1,0 +1,40 @@
+/* One line under the header of an agent whose Claude login is at its limit, with the one
+   button that moves the agent. A flush strip, as the bars of the Changes rail. */
+.line {
+  flex: none;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  padding: 8px 14px 8px 18px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-0);
+}
+.text { flex: 1 1 240px; min-width: 0; display: flex; align-items: baseline; gap: 8px; line-height: 1.4; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--warn, var(--ink-1)); transform: translateY(-1px); }
+.quiet { color: var(--ink-1); }
+.err { color: var(--err); flex-basis: 100%; font-size: var(--text-xs); }
+.btn {
+  flex: none;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--ink-0);
+  color: var(--bg-0);
+  font: inherit;
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.55; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 2px; }
+@media (pointer: coarse) { .btn { height: 40px; } }
+
+/* More than one other login: "Move to [the login ▾] [Move]". */
+.pickRow { flex: none; display: flex; align-items: center; gap: 8px; min-width: 0; max-width: 100%; }
+.pick { flex: 0 1 340px; min-width: 200px; }
+.pick > div > button { height: 30px; }
+@media (pointer: coarse) { .pick > div > button { height: 40px; } }

@@ -1,0 +1,93 @@
+/* src/components/MasterView.module.css — Master tab (A · Inset): the pane, with the lead switch
+   as a segmented control on a row of its own under the header line (AgentPane headExtra). A
+   lead's segment has its avatar, with the lead's status dot on the avatar's corner (LeadAvatar). */
+.view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-1);
+}
+.center {
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.termHost {
+  height: 100%;
+}
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+}
+/* The segmented control: a raised track, the active segment in the panel colour. Master keeps
+   its place; the leads scroll sideways inside the track when the row is too narrow (no
+   scrollbar, a fade at each cut edge: data-cut, set by the view). */
+.leads {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  display: flex;
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+}
+.scroll {
+  --fade: 28px;
+  flex: 0 1 auto;
+  min-width: 0;
+  display: flex;
+  gap: 2px;
+  padding: 2px 2px 2px 0;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+.scroll::-webkit-scrollbar { display: none; }
+.scroll[data-cut="end"] { -webkit-mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent); mask-image: linear-gradient(to right, #000 calc(100% - var(--fade)), transparent); }
+.scroll[data-cut="start"] { -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade)); mask-image: linear-gradient(to right, transparent, #000 var(--fade)); }
+.scroll[data-cut="both"] {
+  -webkit-mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+  mask-image: linear-gradient(to right, transparent, #000 var(--fade), #000 calc(100% - var(--fade)), transparent);
+}
+.lead {
+  position: relative;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px 0 2px;
+  --av-ring: var(--bg-2);
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--ink-1);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-sans);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 0.12s ease, color 0.12s ease;
+}
+@media (hover: hover) { .lead:hover:not(:disabled) { color: var(--ink-0); } }
+.lead[data-active="true"] { background: var(--bg-1); color: var(--ink-0); box-shadow: var(--shadow); --av-ring: var(--bg-1); }
+/* The Master segment has no avatar: it keeps the padding of a text segment. */
+.leads > .lead { margin: 2px; padding: 0 10px; }
+.lead:disabled { cursor: default; color: var(--ink-2); }
+/* Inside the segment: the scroll row would cut an outline around it. */
+.lead:focus-visible { outline: 2px solid var(--ink-1); outline-offset: -2px; }
+/* The time of the last report: on the open lead's segment (each segment's tooltip has its own). */
+.age { color: var(--ink-2); font-weight: var(--weight-regular); font-size: var(--text-xs); font-variant-numeric: tabular-nums; }
+@media (prefers-reduced-motion: reduce) { .lead { transition: none; } }
+/* Phone: the switch is the header's second line; a segment is 40 px to see and 44 px (the
+   track's height) to tap. */
+@media (max-width: 768px) {
+  .lead { height: 40px; padding: 0 12px 0 8px; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+  .lead::after { content: ""; position: absolute; inset: -2px 0; }
+  .leads > .lead { padding: 0 12px; }
+}

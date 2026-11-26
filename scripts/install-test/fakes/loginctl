@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Fake `loginctl` of the install test. <root>/state/linger: yes | no | refused (only "root" can
+# turn it on: the test writes "yes" to the file, as `sudo loginctl enable-linger` would).
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+case ${1:-} in
+  enable-linger)
+    if [ "$(mode linger no)" = refused ]; then echo "Could not enable linger: Interactive authentication required." >&2; exit 1; fi
+    echo yes >"$STATE/linger" ;;
+  disable-linger) echo no >"$STATE/linger" ;;
+  show-user) if [ "$(mode linger no)" = yes ]; then echo Linger=yes; else echo Linger=no; fi ;;
+esac

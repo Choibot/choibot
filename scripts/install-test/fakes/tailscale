@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# Fake `tailscale` of the install test. <root>/state/tailscale: signed-out | no-operator |
+# no-https | no-address | ready. (Not installed = the test removes this file from fakebin.)
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+m=$(mode tailscale signed-out)
+case "${1:-} ${2:-}" in
+  "serve status")
+    case $m in
+      signed-out) echo "Logged out." >&2; exit 1 ;;
+      ready) printf 'https://server.example.ts.net (tailnet only)\n|-- / proxy http://127.0.0.1:%s\n' "$(mode tailscale-port 3100)" ;;
+      *) echo "No serve config" ;;
+    esac ;;
+  "serve --bg")
+    case $m in
+      signed-out) echo "Logged out." >&2; exit 1 ;;
+      no-operator) printf "Access denied: serve config denied\n\nUse 'sudo tailscale serve --bg --https=443 %s'\nTo not require root, use 'sudo tailscale set --operator=\$USER' once.\n" "${4:-}" >&2; exit 1 ;;
+      no-https) printf 'Serve is not enabled on your tailnet.\nTo enable, visit:\n\n         https://login.tailscale.com/f/serve?node=fake\n' >&2; exit 1 ;;
+      *) echo ready >"$STATE/tailscale"; printf '%s' "${4:-}" >"$STATE/tailscale-port"
+         printf 'Available within your tailnet:\n\nhttps://server.example.ts.net/\n|-- proxy http://127.0.0.1:%s\n\nServe started and running in the background.\n' "${4:-}" ;;
+    esac ;;
+  *) echo "fake tailscale: $*" ;;
+esac

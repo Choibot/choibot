@@ -1,0 +1,28 @@
+# ChoiBot — systemd USER unit template.
+# Rendered by `pnpm choibot setup` into ~/.config/systemd/user/ — the
+# double-brace placeholders below get real host paths. Manual install:
+# substitute them yourself, then:
+#   systemctl --user daemon-reload && systemctl --user enable --now choibot
+# Note: user units must NOT have a User= line, and boot from default.target.
+# (Comments must never contain a literal double-brace token that is not a
+# real placeholder — the renderer fails on any leftover.)
+
+[Unit]
+Description=ChoiBot (Fastify + Next.js)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory={{REPO_DIR}}
+EnvironmentFile={{REPO_DIR}}/.env
+Environment=NODE_ENV=production
+Environment=PATH={{PATH}}
+ExecStart={{PNPM_BIN}} start
+Restart=on-failure
+RestartSec=3
+# Give in-flight terminals a moment to close on stop/restart.
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

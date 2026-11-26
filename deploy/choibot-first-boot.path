@@ -1,0 +1,12 @@
+# deploy/choibot-first-boot.path — starts choibot-first-boot.service when a first-start file
+# comes after the boot (a late cloud-init, or a new link from the dashboard). Installed by the
+# image recipe as /etc/systemd/system/choibot-first-boot.path.
+[Unit]
+Description=ChoiBot: watch for a first-start file
+
+[Path]
+PathExists=/etc/choibot/first-start.json
+Unit=choibot-first-boot.service
+
+[Install]
+WantedBy=multi-user.target

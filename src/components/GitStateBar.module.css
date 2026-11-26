@@ -1,0 +1,74 @@
+/* The inspector's branch line (A · Inset): branch icon, HEAD → base in mono,
+   ahead/behind on the right. Warnings sit under it as plain amber lines. */
+.line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+}
+.names {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+button.names { cursor: pointer; transition: background-color 120ms ease; }
+@media (hover: hover) { button.names:hover { background: var(--bg-2); } }
+button.names:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 0; }
+.icon {
+  flex: none;
+  width: 13px;
+  height: 13px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ref {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-0);
+}
+/* The agent branch gives way first; the base is short. */
+.base { flex: none; max-width: 40%; }
+.arrow { flex: none; }
+.ab {
+  flex: none;
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-1);
+  white-space: nowrap;
+}
+
+.warn {
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 1.4;
+  color: var(--warn);
+}
+.warn code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-0);
+}
+.muted { font-size: var(--text-sm); color: var(--ink-2); }
+
+@media (prefers-reduced-motion: reduce) { button.names { transition: none; } }

@@ -1,0 +1,19 @@
+/* src/components/settings/Brain.module.css — the Rules and Devices sections: what the kit
+   (Settings.module.css) has not. A rule is a sentence: it wraps, it is never cut. */
+.text { flex: 1; min-width: 0; overflow-wrap: anywhere; color: var(--ink-0); }
+.act { flex: none; display: inline-flex; align-items: center; gap: 2px; }
+.act .ask { color: var(--ink-1); font-size: var(--text-xs); padding: 0 4px; }
+.small { height: 24px; padding: 0 8px; font-size: var(--text-xs); }
+.edit { flex: 1; min-width: 0; display: flex; align-items: center; gap: 6px; }
+.grow { flex: 1; min-width: 0; }
+.add { display: flex; align-items: center; gap: 8px; }
+.level { flex: none; font-weight: var(--weight-medium); }
+/* With a mouse, a row's buttons show on hover or keyboard focus only (calm list); a touch screen
+   always shows them. A row that asks "Remove?" keeps them. */
+@media (hover: hover) {
+  .act[data-idle] { opacity: 0; transition: opacity 0.12s; }
+  *:hover > .act[data-idle], *:focus-within > .act[data-idle] { opacity: 1; }
+}
+.stack { flex: 1; min-width: 0; display: grid; gap: 4px; padding: 4px 0; }
+.under { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.under .act { margin-left: auto; }

@@ -1,0 +1,153 @@
+/* src/components/XtermTerminal.module.css */
+/* Holds a session's DOM, which React doesn't own. No box of its own. */
+.slot { display: contents; }
+/* Flex column: the terminal grows to fill, the mobile key bar (a flex sibling
+   appended by wireMobileKeys) sits below it — never over the input line. */
+.wrap {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  /* In the agent column (Composer.module.css .col) it shares the height with
+     the composer below; in Shell/Services hosts height:100% applies as before. */
+  flex: 1;
+  min-height: 0;
+}
+.terminal {
+  flex: 1;
+  min-height: 0;
+  padding: 8px;
+  background: var(--term-bg);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  position: relative;
+}
+
+.attachBtn {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  color: var(--term-fg);
+  background: var(--term-chrome);
+  border: 1px solid var(--term-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  opacity: 0.55;
+}
+
+@media (hover: hover) {
+  .attachBtn:hover {
+    opacity: 1;
+  }
+}
+/* Touch: a 40 px target, always readable (no hover to reveal it). */
+@media (max-width: 768px) {
+  .attachBtn { top: 6px; right: 6px; width: 40px; height: 40px; opacity: 0.8; touch-action: manipulation; }
+}
+
+/* Transient "Copied" flash shown when a selection is copied. Top-centre so it
+   clears the find overlay (top-left) and the attach button (top-right). */
+.copyToast {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 7;
+  padding: 3px 9px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--term-fg);
+  background: var(--term-chrome);
+  border: 1px solid var(--term-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), var(--shadow-pop);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 140ms ease;
+}
+.copyToastShow { opacity: 0.95; }
+
+/* Find overlay (Cmd/Ctrl+F). Sits top-left so it clears the attach button. */
+.searchBar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  padding: 3px;
+  background: var(--term-chrome);
+  border: 1px solid var(--term-border);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), var(--shadow-pop);
+}
+
+.searchBar input {
+  width: 180px;
+  padding: 3px 7px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--term-fg);
+  background: transparent;
+  border: none;
+  outline: none;
+}
+
+.searchBar input::placeholder {
+  color: var(--term-muted);
+}
+
+/* Grayscale antialiasing keeps terminal strokes precise on dark surfaces. */
+.terminal :global(.xterm) {
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+/* Saturate the rendered text. Claude Code emits most of its colour as 24-bit
+   truecolor, which bypasses the xterm `theme` palette — so a post-render filter
+   is the only way to intensify ALL output (palette colours and truecolor alike).
+   Applied to the rows layer so the dark background isn't tinted. */
+.terminal :global(.xterm-rows) {
+  filter: saturate(1.4);
+}
+
+/* Lighter touch on a light background — the darker light-mode ANSI palette
+   already reads vividly, so heavy saturation tips into garish. */
+:global(html[data-theme="light"]) .terminal :global(.xterm-rows) {
+  filter: saturate(1.1);
+}
+
+.keyBar { display: none; }
+
+@media (max-width: 768px) {
+  /* A flex sibling below the terminal (flex: none) — it occupies its own row, so
+     the terminal shrinks to fit above it and the bar can't cover the input. */
+  .keyBar {
+    display: flex;
+    flex: none;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 8px calc(6px + env(safe-area-inset-bottom));
+    background: var(--term-chrome);
+    border-top: 1px solid var(--term-border);
+    overflow-x: auto;
+  }
+  /* The composer below owns the safe-area inset. */
+  :global(.composerCol) .keyBar { padding-bottom: 6px; }
+  .keyBtn {
+    flex: none;
+    min-width: 40px; height: 36px;
+    background: var(--bg-2); color: var(--ink-0);
+    border: 1px solid var(--line); border-radius: var(--radius-sm);
+    font-family: var(--font-mono); font-size: var(--text-base); line-height: 1;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .keyBtn[data-armed="true"] { border-color: var(--ink-0); color: var(--ink-0); }
+}

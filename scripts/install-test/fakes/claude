@@ -1,0 +1,95 @@
+#!/usr/bin/env bash
+# Fake `claude` of the install test. The fake installer (see the fake curl) links it into
+# <home>/.local/bin. It does the login commands of the install; every other call goes to the
+# fake of the console's own tests (scripts/chief-fake-claude.sh).
+#   <root>/state/claude-login    ok | fail | third (2 tries fail, the third works)
+#   <root>/state/claude-request  ok | limit | noplan
+# The "login" is a file with a made-up token in the test's own home. Never the real one.
+SELF=$(readlink -f "$0")
+ROOT=$(cd "$(dirname "$SELF")/.." && pwd -P)
+STATE=$ROOT/state
+case $ROOT in /tmp/choibot-it-*) ;; *) echo "fake claude: not inside a test root" >&2; exit 97 ;; esac
+case ${HOME:-} in "$ROOT"/*) ;; *) echo "fake claude: HOME is not the test's home" >&2; exit 97 ;; esac
+printf 'claude %s\n' "$*" >>"$STATE/calls.log"
+mode() { if [ -f "$STATE/$1" ]; then cat "$STATE/$1"; else printf '%s' "$2"; fi; }
+creds=$HOME/.claude/.credentials.json
+case "${1:-} ${2:-}" in
+  "--version "*) echo "0.0.0 (fake Claude Code)"; exit 0 ;;
+  "--help "*) echo "  --restricted   Restricted mode (fake)"; exit 0 ;;
+  "auth status")
+    if [ -f "$creds" ]; then
+      printf '{\n  "loggedIn": true,\n  "authMethod": "claude.ai",\n  "email": "ada@example.invalid",\n  "subscriptionType": "max"\n}\n'; exit 0
+    fi
+    printf '{\n  "loggedIn": false,\n  "authMethod": "none"\n}\n'; exit 1 ;;
+  "auth logout") rm -f "$creds"; echo "Successfully logged out from your Anthropic account."; exit 0 ;;
+  "auth login")
+    n=$(($(mode claude-login-tries 0) + 1)); echo "$n" >"$STATE/claude-login-tries"
+    # The lines of the real command (Claude Code 2.x). With a terminal (the login of the
+    # install agent's offer) nobody types here: <root>/state/claude-login decides. With no
+    # terminal (the login from the page: the console writes the code) it reads one line, and
+    # the code must be the one of <root>/state/claude-code (default: good-code-1234#state).
+    printf 'Opening browser to sign in…\nIf the browser didn'"'"'t open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=fake&state=fake-%s\nPaste code here if prompted > ' "$n"
+    m=$(mode claude-login ok)
+    if [ ! -t 0 ]; then
+      IFS= read -r code || exit 1
+      if [ "$code" != "$(mode claude-code 'good-code-1234#state')" ]; then
+        echo "Couldn't log in: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code."; exit 1
+      fi
+    else
+      echo "••••••••"
+    fi
+    if [ "$m" = ok ] || { [ "$m" = third ] && [ "$n" -ge 3 ]; }; then
+      mkdir -p "$HOME/.claude"
+      (umask 077; printf '{"claudeAiOauth":{"accessToken":"fake-token-of-the-install-test"}}\n' >"$creds")
+      printf '{"oauthAccount":{"emailAddress":"ada@example.invalid"}}\n' >"$HOME/.claude.json"
+      echo "Login successful."; exit 0
+    fi
+    echo "Invalid code. Please try again."; exit 1 ;;
+esac
+# The install agent (`repair`): the test's stand-in for the session. It has no model. It sends
+# the tool calls of <root>/state/agent-calls (one per line: <tool> <TAB> <JSON of tool_input>)
+# through the REAL hook of the --settings it got, prints each decision, and runs a Bash call only
+# when the decision is "allow" (or "ask" with <root>/state/agent-yes: the person said yes).
+if [ "${1:-}" = --restricted ]; then
+  printf '%s\0' "$@" >"$STATE/agent-argv"
+  settings=; prev=
+  for a in "$@"; do [ "$prev" = --settings ] && settings=$a; prev=$a; done
+  hook=$(printf '%s' "$settings" | python3 -c 'import json,sys; print(json.load(sys.stdin)["hooks"]["PreToolUse"][0]["hooks"][0]["command"])')
+  echo "  (the test's stand-in for the Claude Code session. Each call goes through the real rule hook.)"
+  while IFS=$'\t' read -r tool input || [ -n "$tool" ]; do
+    [ -n "$tool" ] || continue
+    call=$(python3 -c 'import json,sys,os; print(json.dumps({"session_id":"fake","cwd":os.getcwd(),"permission_mode":"default","hook_event_name":"PreToolUse","tool_name":sys.argv[1],"tool_input":json.loads(sys.argv[2]),"tool_use_id":"t"}))' "$tool" "$input")
+    answer=$(printf '%s' "$call" | sh -c "$hook")
+    decision=$(printf '%s' "$answer" | python3 -c 'import json,sys; o=json.load(sys.stdin)["hookSpecificOutput"]; print(o["permissionDecision"] + "\t" + o["permissionDecisionReason"])')
+    shown=$(python3 -c 'import json,sys; i=json.loads(sys.argv[1]); print(i.get("command") or i.get("file_path") or i.get("path") or "")' "$input")
+    printf '  ● %s(%s)\n      rule: %s\n' "$tool" "$shown" "${decision%%$'\t'*}: ${decision#*$'\t'}" | sed "s#$ROOT/home#~#g"
+    if [ "$tool" = Bash ] && { [ "${decision%%$'\t'*}" = allow ] || { [ "${decision%%$'\t'*}" = ask ] && [ -f "$STATE/agent-yes" ]; }; }; then
+      sh -c "$shown" 2>&1 | tail -n 4 | sed 's/^/      /'
+    fi
+  done <"$STATE/agent-calls"
+  exit 0
+fi
+for a in "$@"; do
+  if [ "$a" = "Reply with the one word: ready" ]; then
+    case $(mode claude-request ok) in
+      limit) echo "You've hit your session limit · resets 2pm (UTC)"; exit 1 ;;
+      noplan) echo "Your account does not have access to Claude Code. Please upgrade your plan."; exit 1 ;;
+      *) echo ready; exit 0 ;;
+    esac
+  fi
+done
+# Every other call is the fake of the console's own tests. Its log folder and the knobs of the
+# guide's model come from <root>/state, because an agent and the guide get no env of the test:
+#   <root>/state/guide-reply   a file: the reply of the guide's model
+#   <root>/state/guide-fail    login | limit | limit:<epoch seconds> | down
+#   <root>/state/agent         a program: what an agent does after its start (the path test's fake
+#                              agent). It gets the argv of this call and runs next to the session.
+export CHIEF_FAKE_LOG=$STATE/claude-log
+mkdir -p "$CHIEF_FAKE_LOG"
+[ ! -f "$STATE/guide-reply" ] || export CHIEF_FAKE_GUIDE=$STATE/guide-reply
+[ ! -f "$STATE/guide-fail" ] || export CHIEF_FAKE_GUIDE_FAIL=$(cat "$STATE/guide-fail")
+print=0; for a in "$@"; do case $a in -p | --print) print=1 ;; esac; done
+if [ $print = 0 ] && [ -x "$STATE/agent" ]; then
+  FAKE_SESSION_PID=$$ setsid "$STATE/agent" "$@" >>"$STATE/agent.log" 2>&1 </dev/null &
+fi
+exec bash "$(cat "$STATE/repo")/scripts/chief-fake-claude.sh" "$@"

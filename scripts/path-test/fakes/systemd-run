@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# Fake `systemd-run --user` of the path test. The console uses the real one for one thing that
+# the test reaches: the restart after a save in Settings ("--on-active=<s> … systemctl --user
+# restart <unit>"). Here: wait that long, then run the command with the test's own fake
+# systemctl. It never talks to a real service manager.
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+wait_s=0
+while [ $# -gt 0 ]; do
+  case $1 in
+    --on-active=*) wait_s=${1#--on-active=} ;;
+    --) shift; break ;;
+    -*) ;;
+    *) break ;;
+  esac
+  shift
+done
+[ $# -gt 0 ] || { echo "fake systemd-run: no command" >&2; exit 1; }
+[ "$1" = systemctl ] || { echo "fake systemd-run: only a systemctl command is a part of the test (got: $1)" >&2; exit 1; }
+shift
+# One simple command in the background: no pipe of the caller stays open in it.
+setsid sh -c 'sleep "$1"; shift; exec "$@"' sh "$wait_s" "$ROOT/fakebin/systemctl" "$@" >>"$STATE/systemd-run.log" 2>&1 </dev/null &

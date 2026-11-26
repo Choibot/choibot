@@ -1,0 +1,360 @@
+/* The inspector (A · Inset): 300 px on the right of the panel, one hairline on
+   its left. Text tabs in a 52 px row (the height of the pane header), the
+   branch block, then the body that scrolls. */
+.rail {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  border-left: 1px solid var(--line);
+  background: var(--bg-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-0);
+  overflow: hidden;
+}
+
+/* ---- Tabs: Changes / Plan / Docs ---- */
+.tabs {
+  flex: none;
+  display: flex;
+  align-items: flex-end;
+  gap: 18px;
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.tab {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: -1px;
+  padding: 0 0 14px;
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid transparent;
+  font: var(--weight-medium) var(--text-sm)/1.45 var(--font-sans);
+  color: var(--ink-2);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms ease, border-color 120ms ease;
+}
+@media (hover: hover) { .tab:hover { color: var(--ink-1); } }
+.tab:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 2px; border-radius: 2px; }
+.tabOn { color: var(--ink-0); border-bottom-color: var(--ink-0); }
+@media (hover: hover) { .tabOn:hover { color: var(--ink-0); border-bottom-color: var(--ink-0); } }
+.pill {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  font: var(--weight-medium) var(--text-xs)/18px var(--font-sans);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- Branch block: branch line, checks line, Review / Open in editor ---- */
+.top {
+  flex: none;
+  display: grid;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--line);
+}
+.line { display: flex; align-items: center; gap: 6px; min-width: 0; color: var(--ink-1); }
+.line svg { flex: none; width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.mono {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-0);
+}
+
+.ciWrap { display: grid; gap: 4px; min-width: 0; }
+.ciLine { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ciToggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  font: var(--weight-regular) var(--text-sm)/1.45 var(--font-sans);
+  color: var(--ink-1);
+  text-align: left;
+}
+button.ciToggle { cursor: pointer; transition: background-color 120ms ease; }
+@media (hover: hover) { button.ciToggle:hover { background: var(--bg-2); } }
+button.ciToggle:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 0; }
+.ciText { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.caret { flex: none; display: grid; color: var(--ink-2); }
+.dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--run); }
+.dot[data-tone="ok"] { background: var(--ok); }
+.dot[data-tone="err"] { background: var(--err); }
+.dot[data-tone="run"] { box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 28%, transparent); }
+.dot[data-tone="idle"] { background: transparent; border: 1.5px solid var(--idle); }
+.prLink {
+  flex: none;
+  margin: -2px -4px -2px 0;
+  padding: 2px 4px;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  font: var(--weight-medium) var(--text-sm)/1.45 var(--font-sans);
+  color: var(--ink-1);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+@media (hover: hover) { .prLink:hover { color: var(--ink-0); background: var(--bg-2); } }
+.prLink:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 0; }
+
+/* Each check, folded under the checks line; it scrolls inside itself. */
+.ciBody {
+  max-height: 220px;
+  overflow-y: auto;
+  margin: 0 -8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.ciRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  height: 26px;
+  padding: 0 8px;
+  border-radius: 6px;
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+  text-decoration: none;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+@media (hover: hover) { a.ciRow:hover { background: var(--bg-2); color: var(--ink-0); } }
+.ciGlyph { flex: none; width: 12px; display: grid; place-items: center; }
+.ciOk { color: var(--ok); }
+.ciBad { color: var(--err); }
+.ciPend { color: var(--ink-2); }
+.ciName { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ciMeta { flex: none; display: inline-flex; align-items: center; gap: 4px; font: var(--text-xs) var(--font-mono); color: var(--ink-2); white-space: nowrap; }
+.ciLogWrap { margin: 2px 8px 6px; }
+.ciLogSummary { cursor: pointer; font-size: var(--text-xs); color: var(--ink-1); display: flex; align-items: center; gap: 6px; list-style: none; }
+.ciLogSummary::-webkit-details-marker { display: none; }
+.ciLogSummary svg { color: var(--err); transition: transform 120ms ease-out; }
+details[open] > .ciLogSummary svg { transform: rotate(90deg); }
+.ciLog {
+  margin: 6px 0 0;
+  padding: 8px;
+  max-height: 180px;
+  overflow: auto;
+  background: var(--bg-2);
+  border-radius: var(--radius-sm);
+  font: var(--text-xs)/1.5 var(--font-mono);
+  color: var(--ink-1);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.btns { display: flex; gap: 6px; }
+.btn {
+  flex: none;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  padding: 0 10px;
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  font: var(--weight-medium) var(--text-sm) var(--font-sans);
+  color: var(--ink-0);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+@media (hover: hover) { .btn:hover { background: var(--bg-3); } }
+.btn:active { background: var(--bg-2); }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.pri { background: var(--inv); border-color: transparent; color: var(--inv-ink); }
+@media (hover: hover) { .pri:hover { background: var(--inv-hover); } }
+.pri:active { background: var(--inv); }
+
+/* ---- Changes body ---- */
+.list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 8px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.flh {
+  margin: 0;
+  padding: 12px 16px 4px;
+  font: var(--weight-medium) var(--text-xs)/1.45 var(--font-sans);
+  color: var(--ink-2);
+}
+.files { list-style: none; margin: 0; padding: 0; }
+/* One 30 px row: status letter, dim folder + bright name (the folder gives
+   way first, cut on its left), +/- counts. Discard (×) takes the counts'
+   place on hover and focus; always shown on touch. */
+.row { position: relative; display: flex; align-items: center; margin: 0 6px; }
+.item {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  height: 30px;
+  padding: 0 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: var(--weight-regular) var(--text-sm) var(--font-sans);
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+@media (hover: hover) { .item:hover { background: var(--bg-2); } }
+.item:focus-visible { outline: 2px solid var(--ink-1); outline-offset: -2px; }
+.itemActive { background: var(--bg-3); }
+@media (hover: hover) { .itemActive:hover { background: var(--bg-3); } }
+.st { flex: none; width: 10px; font: var(--weight-medium) var(--text-xs) var(--font-mono); color: var(--ink-2); }
+.path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+.dir { color: var(--ink-2); }
+.base { color: var(--ink-0); font-weight: var(--weight-medium); }
+.nums { flex: none; display: flex; gap: 9px; font: var(--text-xs) var(--font-mono); font-variant-numeric: tabular-nums; }
+.add { color: var(--add); }
+.del { color: var(--del); }
+.discard {
+  position: absolute;
+  top: 5px;
+  right: 6px;
+  width: 20px;
+  height: 20px;
+  display: none;
+  place-items: center;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 5px;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: color 120ms ease, background-color 120ms ease;
+}
+@media (hover: hover) { .discard:hover { color: var(--err); background: var(--bg-1); } }
+.discard:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 0; }
+/* :focus-visible, not :focus-within: a clicked row keeps its counts. */
+.row:has(:focus-visible) .discard { display: grid; }
+@media (hover: hover) { .row:hover .discard { display: grid; } }
+.row:has(:focus-visible) .nums { visibility: hidden; }
+@media (hover: hover) { .row:hover .nums { visibility: hidden; } }
+@media (hover: none) {
+  .discard, .row:hover .discard { position: static; flex: none; display: grid; width: 32px; height: 30px; }
+  .row:hover .nums, .row:has(:focus-visible) .nums { visibility: visible; }
+  .item:hover { background: none; }
+}
+
+.empty {
+  flex: 1;
+  padding: 14px 16px;
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+
+/* ---- Plan body ---- */
+.plan {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 12px 6px 14px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.planMeta {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 0 10px 8px;
+  font: var(--weight-medium) var(--text-xs)/1.45 var(--font-sans);
+  color: var(--ink-2);
+}
+.planFile { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.planCount { flex: none; font-variant-numeric: tabular-nums; }
+.planBarWrap { height: 4px; margin: 0 10px 8px; border-radius: 2px; background: var(--bg-2); overflow: hidden; }
+.planBar { height: 100%; border-radius: 2px; background: var(--ink-1); transition: width 0.4s ease; }
+.taskList { list-style: none; margin: 0; padding: 0; }
+.task {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  padding: 0 10px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: var(--weight-regular) var(--text-sm)/1.4 var(--font-sans);
+  color: var(--ink-1);
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  white-space: nowrap;
+  transition: background-color 120ms ease;
+}
+/* Live-task rows are divs, not buttons: read-only mirrors of the agent's own
+   task list, so no pointer and no hover. */
+@media (hover: hover) { .task:not(.taskStatic):hover { background: var(--bg-2); color: var(--ink-0); } }
+.task:focus-visible { outline: 2px solid var(--ink-1); outline-offset: -2px; }
+.taskStatic { cursor: default; }
+.taskActive { color: var(--ink-0); }
+.taskGlyph { flex: none; width: 12px; display: grid; place-items: center; }
+.tDone { color: var(--ink-2); }
+.tActive { color: var(--ink-0); }
+.tPending { color: var(--ink-2); }
+.taskTitle { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.taskCount { flex: none; font: var(--text-xs) var(--font-mono); color: var(--ink-2); }
+.stepList { list-style: none; margin: 0 0 6px; padding: 0 10px 0 29px; }
+.step {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  padding: 3px 0;
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+}
+.stepDone { color: var(--ink-2); }
+.stepDone .stepText { text-decoration: line-through; text-decoration-color: var(--line-2); }
+.stepBox { flex: none; align-self: flex-start; width: 12px; height: 12px; margin-top: 3px; display: grid; place-items: center; border: 1px solid var(--line-2); border-radius: 3px; }
+.stepBox[data-on] { border-color: transparent; background: var(--bg-3); color: var(--ink-1); }
+.stepText { min-width: 0; overflow-wrap: anywhere; white-space: normal; }
+
+@media (prefers-reduced-motion: reduce) {
+  .tab, .btn, .item, .discard, .prLink, button.ciToggle, .task, .planBar { transition: none; }
+}
+
+/* Phone (the Changes sheet): rows and their discard button are finger-size (44 px). */
+@media (max-width: 768px) {
+  .item { height: 44px; font-size: var(--text-sm); }
+  .discard, .row:hover .discard { width: 44px; height: 44px; }
+  .ciRow { min-height: 40px; }
+  .btn { height: 36px; padding: 0 14px; touch-action: manipulation; }
+}

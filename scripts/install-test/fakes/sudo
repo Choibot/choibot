@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Fake `sudo` of the install test: it runs nothing. Each call is in <root>/state/sudo.log, and
+# the test fails when the install script made one.
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+printf '%s\n' "$*" >>"$STATE/sudo.log"
+echo "sudo: a password is required" >&2
+exit 1

@@ -1,0 +1,64 @@
+/* The Merge button of a pr ticket (QueueMerge.tsx): a split button (Merge | method), its confirm
+   row in place, and one short line for a reason, a wait or the GitHub error. The buttons take the
+   Queue view's own .b / .pri classes. */
+.box { position: relative; display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 6px 8px; min-width: 0; }
+/* MergeLine: the first row of the footer, the full width, at the right like the button. */
+.line, .err { flex: 1 0 100%; min-width: 0; font-size: var(--text-xs); line-height: 16px; text-align: right; overflow-wrap: anywhere; }
+.line { color: var(--ink-1); }
+.err { color: var(--err); max-height: 64px; overflow: auto; }
+/* The confirm step: the other buttons of the row step aside, so the row keeps its size. */
+*:has(> .box[data-confirm]) > :not(.box) { display: none; }
+
+.split { position: relative; display: inline-flex; }
+.main { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.caret {
+  padding: 0 7px; border-top-left-radius: 0; border-bottom-left-radius: 0;
+  border-left: 1px solid color-mix(in srgb, var(--inv-ink) 22%, transparent);
+}
+
+/* The "more" button and its menu (Open PR on GitHub, I merged it). */
+.more { position: relative; display: inline-flex; }
+.moreBtn { width: 28px; padding: 0; color: var(--ink-1); }
+.menuStart { left: 0; right: auto; }
+.itemText { flex: 1; }
+.item .itemText + svg { color: var(--ink-2); }
+.item kbd { margin-left: 10px; }
+.item:disabled { opacity: 0.45; cursor: default; }
+
+/* The menus open upward: the footer is at the bottom of the pane. */
+.menu {
+  position: absolute; right: 0; bottom: calc(100% + 6px); z-index: 20; display: grid; width: max-content; min-width: 190px; padding: 4px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: var(--bg-1); box-shadow: var(--shadow-pop);
+}
+.item {
+  display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 10px 0 6px; border: 0; border-radius: 5px;
+  background: none; color: var(--ink-0); font: var(--weight-medium) var(--text-sm)/1 var(--font-sans); text-align: left;
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+}
+.menuStart .item { padding-left: 10px; }
+.item:focus-visible { outline: 2px solid var(--ink-1); outline-offset: -2px; }
+.tick { display: inline-flex; width: 14px; justify-content: center; color: var(--ink-1); }
+@media (hover: hover) { .item:hover { background: var(--bg-3); } }
+
+.confirm { display: inline-flex; align-items: center; justify-content: flex-end; gap: 6px 10px; min-width: 0; }
+/* Two lines: the question, then what GitHub says will merge (one line, cut). */
+.ask { display: grid; min-width: 0; max-width: 460px; text-align: right; }
+.q { color: var(--ink-0); font-size: var(--text-sm); font-weight: var(--weight-medium); line-height: 18px; overflow-wrap: anywhere; }
+.meta { color: var(--ink-2); font-size: var(--text-xs); line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pair { display: inline-flex; gap: 6px; }
+
+/* A phone (and a narrow view): Merge takes the free width of the button row; the confirm takes
+   the whole row (the other buttons step aside). */
+[data-mobile] .box { flex: 1 1 0; display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+[data-mobile] .box[data-confirm] { flex-basis: 100%; }
+[data-mobile] .split, [data-mobile] .pair { display: flex; }
+[data-mobile] .main, [data-mobile] .pair > button { flex: 1; justify-content: center; min-height: 46px; font-size: var(--text-base); }
+[data-mobile] .caret { flex: none !important; min-height: 46px; padding: 0 14px; }
+[data-mobile] .moreBtn { width: 46px; min-height: 46px; flex: none !important; }
+[data-mobile] .menu { min-width: 240px; }
+[data-mobile] .item { height: 44px; font-size: var(--text-base); }
+[data-mobile] .confirm { display: grid; gap: 8px; justify-content: stretch; }
+[data-mobile] .ask { max-width: none; text-align: left; }
+[data-mobile] .q { font-size: var(--text-base); line-height: 22px; }
+[data-mobile] .line, [data-mobile] .err { flex: none; text-align: left; font-size: var(--text-phone-sm); }
+[data-mobile] .meta { white-space: normal; overflow-wrap: anywhere; }

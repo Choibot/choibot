@@ -1,0 +1,37 @@
+/* src/components/DeployPanel.module.css — the deploy ticket's block (A · Inset): one hairline card,
+   radius 12. Mono only for the commits; colour only at dot size. */
+.box { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: var(--radius); font-size: var(--text-sm); line-height: 1.45; color: var(--ink-1); }
+.commits { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; font: var(--weight-regular) var(--text-xs) var(--font-mono); color: var(--ink-2); }
+.commits b { color: var(--ink-0); font-weight: var(--weight-medium); }
+.note { color: var(--ink-0); overflow-wrap: anywhere; }
+.steps { display: flex; flex-wrap: wrap; gap: 4px 16px; margin: 0; padding: 0; list-style: none; }
+.step { display: flex; align-items: center; gap: 6px; color: var(--ink-2); }
+.step[data-state="done"] { color: var(--ink-1); }
+.step[data-state="now"] { color: var(--ink-0); font-weight: var(--weight-medium); }
+.step[data-state="now"] .mark { animation: pulse 1.2s ease-in-out infinite; }
+.step[data-state="skipped"] { color: var(--ink-2); }
+.mark { flex: none; width: 12px; display: grid; place-items: center; }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.25; } }
+@media (prefers-reduced-motion: reduce) { .step[data-state="now"] .mark { animation: none; } }
+/* A result line: a dot, then the text (red for a failed run, green for a done one). */
+.failed, .done { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; color: var(--ink-0); overflow-wrap: anywhere; }
+.failed { align-items: flex-start; flex-direction: column; gap: 8px; }
+.failed > div, .done > span { display: flex; align-items: baseline; gap: 8px; }
+.failed > div::before, .done > span::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--err); transform: translateY(-1px); }
+.done > span::before { background: var(--ok); }
+.tail { align-self: stretch; margin: 0; max-height: 220px; overflow: auto; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--bg-2); color: var(--ink-1); font: var(--weight-regular) var(--text-xs)/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: none; color: var(--ink-0);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color 0.12s ease;
+}
+@media (hover: hover) { .btn:hover:not(:disabled) { background: var(--bg-2); } }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.pri { border-color: transparent; background: var(--inv); color: var(--inv-ink); }
+@media (hover: hover) { .pri:hover:not(:disabled) { background: var(--inv-hover); } }
+.hint { color: var(--ink-2); font-size: var(--text-xs); line-height: 1.45; }
+.error { display: flex; align-items: baseline; gap: 8px; color: var(--ink-0); overflow-wrap: anywhere; }
+.error::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--err); transform: translateY(-1px); }
+@media (max-width: 640px) { .btn { height: auto; min-height: 36px; padding: 8px 14px; touch-action: manipulation; } }

@@ -1,0 +1,308 @@
+#!/usr/bin/env python3
+"""Fake `gh` of the path test (scripts/path-test). It is GitHub and its tool in one file, for
+ONE test root. It never opens a network connection.
+
+  <root>/github.com/<owner>/<name>.git   the repos "on GitHub": bare git repos. The test's git
+                                         reads https://github.com/ addresses from this folder
+                                         (a url.insteadOf line in the test's own git settings).
+  <root>/gh/login                        the account that is logged in (no file = not logged in)
+  <root>/gh/repos.json                   the repo list of the account, in the shape of the console's query
+  <root>/gh/prs/<owner>__<name>/<n>.json the pull requests
+  <root>/gh/approve                      the test makes it: the person approved the code on github.com
+  <root>/state/gh-login                  ok | expire | deny     what the next code login does
+  <root>/state/gh-clone                  ok | network           what the next repo copy does
+
+Each call is one line in <root>/state/calls.log, as with the other fakes.
+"""
+import json
+import os
+import subprocess
+import sys
+import time
+
+SELF = os.path.realpath(__file__)
+ROOT = os.path.dirname(os.path.dirname(SELF))
+if not ROOT.startswith("/tmp/choibot-it-"):
+    sys.exit("fake gh: not inside a test root (%s)" % ROOT)
+STATE = os.path.join(ROOT, "state")
+GH = os.path.join(ROOT, "gh")
+REMOTES = os.path.join(ROOT, "github.com")
+ACCOUNT = {"login": "ada-dev", "id": 4242, "name": "Ada Dev", "email": None}
+ARGS = sys.argv[1:]
+
+with open(os.path.join(STATE, "calls.log"), "a") as log:
+    log.write("gh %s\n" % " ".join(ARGS))
+
+
+def mode(name, default):
+    try:
+        with open(os.path.join(STATE, name)) as f:
+            return f.read().strip() or default
+    except OSError:
+        return default
+
+
+def die(text, code=1):
+    sys.stderr.write(text.rstrip("\n") + "\n")
+    sys.exit(code)
+
+
+def logged_in():
+    return os.path.isfile(os.path.join(GH, "login"))
+
+
+def need_login():
+    if not logged_in():
+        die("To get started with GitHub CLI, please run:  gh auth login\n"
+            "Alternatively, populate the GH_TOKEN environment variable with a GitHub API authentication token.", 4)
+
+
+def flag(name, default=None):
+    """The value after --name, or of --name=value."""
+    for i, a in enumerate(ARGS):
+        if a == name and i + 1 < len(ARGS):
+            return ARGS[i + 1]
+        if a.startswith(name + "="):
+            return a[len(name) + 1:]
+    return default
+
+
+def git(args, cwd=None):
+    r = subprocess.run(["git"] + args, cwd=cwd, capture_output=True, text=True)
+    return r.returncode, r.stdout.strip(), r.stderr.strip()
+
+
+def slug_here():
+    """The repo of the current folder: the name at the end of its origin address."""
+    code, out, _ = git(["config", "--get", "remote.origin.url"])
+    if code != 0 or "github.com" not in out:
+        die("fatal: not a git repository (or any of the parent directories): .git" if code != 0
+            else "none of the git remotes configured for this repository point to a known GitHub host.")
+    slug = out.split("github.com", 1)[1].lstrip(":/")
+    return slug[:-4] if slug.endswith(".git") else slug
+
+
+def bare(slug):
+    return os.path.join(REMOTES, slug + ".git")
+
+
+def pr_dir(slug):
+    return os.path.join(GH, "prs", slug.replace("/", "__"))
+
+
+def read_pr(slug, ref):
+    """A pull request by number, address or branch name. The head commit is read from the repo."""
+    d = pr_dir(slug)
+    names = sorted(os.listdir(d), key=lambda n: int(n[:-5])) if os.path.isdir(d) else []
+    prs = []
+    for n in names:
+        with open(os.path.join(d, n)) as f:
+            prs.append(json.load(f))
+    hit = None
+    for p in prs:
+        if str(p["number"]) == ref or p["url"] == ref or (p["headRefName"] == ref and p["state"] == "OPEN"):
+            hit = p
+    if hit is None:
+        die('no pull requests found for branch "%s"' % ref if not ref.isdigit()
+            else "GraphQL: Could not resolve to a PullRequest with the number of %s. (repository.pullRequest)" % ref)
+    if hit["state"] == "OPEN":
+        code, sha, _ = git(["-C", bare(slug), "rev-parse", "refs/heads/" + hit["headRefName"]])
+        if code == 0:
+            hit["headRefOid"] = sha
+    return hit
+
+
+def write_pr(slug, pr):
+    os.makedirs(pr_dir(slug), exist_ok=True)
+    path = os.path.join(pr_dir(slug), "%d.json" % pr["number"])
+    with open(path + ".tmp", "w") as f:
+        json.dump(pr, f)
+    os.replace(path + ".tmp", path)
+
+
+def fields(pr):
+    want = flag("--json")
+    if not want:
+        return pr
+    return {k: pr.get(k) for k in want.split(",")}
+
+
+def out(value):
+    print(json.dumps(value))
+
+
+def now():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def auth():
+    sub = ARGS[1] if len(ARGS) > 1 else ""
+    if sub == "status":
+        if logged_in():
+            print("github.com\n  ✓ Logged in to github.com account %s (%s/.config/gh/hosts.yml)" % (ACCOUNT["login"], os.environ.get("HOME", "~")))
+            return
+        die("You are not logged into any GitHub hosts. To log in, run: gh auth login")
+    if sub == "setup-git":
+        need_login()
+        open(os.path.join(GH, "setup-git"), "w").close()
+        return
+    if sub == "logout":
+        if logged_in():
+            os.remove(os.path.join(GH, "login"))
+        return
+    if sub == "login":
+        m = mode("gh-login", "ok")
+        approve = os.path.join(GH, "approve")
+        if os.path.exists(approve):
+            os.remove(approve)
+        code = "%04X-%04X" % (os.getpid() % 65536, int(time.time()) % 65536)
+        with open(os.path.join(GH, "code"), "w") as f:
+            f.write(code)
+        sys.stderr.write("\n! First copy your one-time code: %s\nOpen this URL to continue in your web browser: https://github.com/login/device\n" % code)
+        sys.stderr.flush()
+        if m == "expire":
+            time.sleep(3)
+            die("failed to authenticate via web browser: This 'device_code' has expired. (expired_token)")
+        if m == "deny":
+            time.sleep(3)
+            die("failed to authenticate via web browser: The authorization request was denied. (access_denied)")
+        end = time.time() + 900
+        while time.time() < end:
+            if os.path.exists(approve):
+                os.remove(approve)
+                with open(os.path.join(GH, "login"), "w") as f:
+                    f.write(ACCOUNT["login"])
+                sys.stderr.write("✓ Authentication complete.\n✓ Logged in as %s\n" % ACCOUNT["login"])
+                return
+            time.sleep(0.2)
+        die("failed to authenticate via web browser: This 'device_code' has expired. (expired_token)")
+    die("fake gh: auth %s is not a part of the test" % sub, 2)
+
+
+def api():
+    need_login()
+    path = next((a for a in ARGS[1:] if not a.startswith("-") and a != flag("--jq")), "")
+    jq = flag("--jq")
+    if path == "user":
+        print(ACCOUNT["login"]) if jq == ".login" else out(ACCOUNT)
+        return
+    if path == "rate_limit":
+        out({"resources": {"core": {"limit": 5000, "remaining": 4990, "reset": int(time.time()) + 3600}}})
+        return
+    if path.startswith("user/repos"):
+        with open(os.path.join(GH, "repos.json")) as f:
+            rows = json.load(f)
+        page = 1
+        if "&page=" in path:
+            page = int(path.split("&page=", 1)[1].split("&", 1)[0])
+        out(rows if page == 1 else [])
+        return
+    if path.startswith("repos/"):
+        slug = path[len("repos/"):]
+        with open(os.path.join(GH, "repos.json")) as f:
+            row = next((r for r in json.load(f) if r["slug"] == slug), None)
+        if row is None:
+            die("gh: Not Found (HTTP 404)")
+        if jq == ".permissions.push":
+            print("true" if row["push"] else "false")
+            return
+        out({"full_name": slug, "private": row["private"], "permissions": {"pull": True, "push": row["push"]}})
+        return
+    die("fake gh: api %s is not a part of the test" % path, 2)
+
+
+def repo():
+    if len(ARGS) < 4 or ARGS[1] != "clone":
+        die("fake gh: repo %s is not a part of the test" % " ".join(ARGS[1:2]), 2)
+    need_login()
+    slug, dest = ARGS[2], ARGS[3]
+    if mode("gh-clone", "ok") == "network":
+        os.remove(os.path.join(STATE, "gh-clone"))   # one failure, then it works: "Press the button again."
+        sys.stderr.write("Cloning into '%s'...\n" % dest)
+        die("fatal: unable to access 'https://github.com/%s.git/': Could not resolve host: github.com\nfailed to run git: exit status 128" % slug)
+    rest = ARGS[ARGS.index("--") + 1:] if "--" in ARGS else []
+    # The address is the real one. The test's git settings send it to <root>/github.com.
+    r = subprocess.run(["git", "clone"] + rest + ["https://github.com/%s.git" % slug, dest], stdout=subprocess.DEVNULL)
+    sys.exit(r.returncode)
+
+
+def pr():
+    sub = ARGS[1] if len(ARGS) > 1 else ""
+    need_login()
+    slug = slug_here()
+    if sub == "create":
+        head, base = flag("--head"), flag("--base", "main")
+        if not head:
+            _, head, _ = git(["rev-parse", "--abbrev-ref", "HEAD"])
+        code, sha, _ = git(["-C", bare(slug), "rev-parse", "refs/heads/" + head])
+        if code != 0:
+            die("pull request create failed: GraphQL: Head sha can't be blank, Head ref must be a branch (createPullRequest)\nYou must first push the current branch to a remote.")
+        d = pr_dir(slug)
+        number = 1 + (len(os.listdir(d)) if os.path.isdir(d) else 0)
+        url = "https://github.com/%s/pull/%d" % (slug, number)
+        write_pr(slug, {
+            "number": number, "url": url, "state": "OPEN", "isDraft": False, "mergeable": "MERGEABLE",
+            "reviewDecision": "", "baseRefName": base, "headRefName": head, "headRefOid": sha,
+            "title": flag("--title", ""), "body": flag("--body", ""), "statusCheckRollup": [], "comments": [],
+            "author": {"login": ACCOUNT["login"]}, "updatedAt": now(),
+        })
+        print(url)
+        return
+    if sub == "list":
+        d = pr_dir(slug)
+        names = os.listdir(d) if os.path.isdir(d) else []
+        prs = [read_pr(slug, n[:-5]) for n in names]
+        out([fields(p) for p in prs if p["state"] == "OPEN"])
+        return
+    ref = next((a for a in ARGS[2:] if not a.startswith("-") and a != flag("--json") and a != flag("--match-head-commit")), None)
+    if ref is None:
+        _, ref, _ = git(["rev-parse", "--abbrev-ref", "HEAD"])
+    one = read_pr(slug, ref)
+    if sub == "view":
+        out(fields(one))
+        return
+    if sub == "merge":
+        if one["state"] != "OPEN":
+            die("! Pull request %s#%d was already %s" % (slug, one["number"], one["state"].lower()))
+        want = flag("--match-head-commit")
+        if want and want != one["headRefOid"]:
+            die("GraphQL: Head branch was modified. Review and try the merge again. (mergePullRequest)")
+        # A real squash merge in the repo on "GitHub": one new commit on the base branch.
+        b = bare(slug)
+        _, base_sha, _ = git(["-C", b, "rev-parse", "refs/heads/" + one["baseRefName"]])
+        env = dict(os.environ, GIT_AUTHOR_NAME=ACCOUNT["name"], GIT_AUTHOR_EMAIL="ada@example.invalid",
+                   GIT_COMMITTER_NAME="GitHub", GIT_COMMITTER_EMAIL="noreply@example.invalid")
+        r = subprocess.run(["git", "-C", b, "commit-tree", one["headRefOid"] + "^{tree}", "-p", base_sha,
+                            "-m", "%s (#%d)" % (one["title"], one["number"])], capture_output=True, text=True, env=env)
+        if r.returncode != 0:
+            die("fake gh: the merge commit failed: " + r.stderr)
+        git(["-C", b, "update-ref", "refs/heads/" + one["baseRefName"], r.stdout.strip(), base_sha])
+        one.update(state="MERGED", mergedAt=now(), updatedAt=now(), mergeCommit={"oid": r.stdout.strip()})
+        write_pr(slug, one)
+        print("✓ Squashed and merged pull request %s#%d (%s)" % (slug, one["number"], one["title"]))
+        return
+    if sub in ("close", "reopen"):
+        one.update(state="CLOSED" if sub == "close" else "OPEN", updatedAt=now())
+        write_pr(slug, one)
+        return
+    die("fake gh: pr %s is not a part of the test" % sub, 2)
+
+
+def main():
+    os.makedirs(GH, exist_ok=True)
+    cmd = ARGS[0] if ARGS else ""
+    if cmd == "--version":
+        print("gh version 0.0.0 (the fake of the path test)")
+    elif cmd == "auth":
+        auth()
+    elif cmd == "api":
+        api()
+    elif cmd == "repo":
+        repo()
+    elif cmd == "pr":
+        pr()
+    else:
+        die("fake gh: `%s` is not a part of the test" % " ".join(ARGS[:2]), 2)
+
+
+main()

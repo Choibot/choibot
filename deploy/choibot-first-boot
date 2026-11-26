@@ -1,0 +1,62 @@
+#!/bin/sh
+# deploy/choibot-first-boot — the first boot of a server made from a prepared image (a hosted
+# server). Installed as /usr/local/sbin/choibot-first-boot (root, 0755) by the image recipe; it
+# runs as root from choibot-first-boot.service (at boot) and choibot-first-boot.path (a file that
+# comes later).
+#
+# The provider's first-start data (cloud-init user data, write_files) puts the first-start file
+# at /etc/choibot/first-start.json (root, 0600). It holds the SHA-256 of the claim secret, never
+# the secret (server/chief/claimlink.ts has the format). This step:
+#   1. copies it for the console's user (a folder of root in /run, the file 0600 of that user),
+#      and removes /etc/choibot/first-start.json;
+#   2. runs `<cli> first-start <copy>` as that user (bin/lib/firststart.ts): a new cookie secret,
+#      the console's address, the claim link in the console's data folder;
+#   3. restarts the console when it runs already (it reads its settings at start).
+# The config is /etc/choibot/first-boot.conf, plain KEY=VALUE lines (never sourced):
+#   CONSOLE_USER=<the console's user>   CLI=<full path of the command>   UNIT=<the console's unit>
+# Root reads nothing of the console user's files; the copy goes from root's file to root's folder.
+set -eu
+
+# The fixed values. A test (never root) may give its own root folder and PATH; as root, the
+# values of the caller are never taken.
+ROOT=
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+if [ "$(/usr/bin/id -u)" != 0 ]; then
+  ROOT=${CHOIBOT_FIRST_BOOT_ROOT:-}
+  PATH=${CHOIBOT_FIRST_BOOT_PATH:-$PATH}
+fi
+export PATH
+SRC=$ROOT/etc/choibot/first-start.json
+CONF=$ROOT/etc/choibot/first-boot.conf
+
+say() { printf 'choibot-first-boot: %s\n' "$*" >&2; }
+
+[ -f "$SRC" ] || exit 0
+[ -f "$CONF" ] || { say "no $CONF"; exit 1; }
+# The last value of each key, only when it has the right shape.
+conf() { sed -n "s#^$1=\\($2\\)\$#\\1#p" "$CONF" | tail -n 1; }
+user=$(conf CONSOLE_USER '[a-z_][a-z0-9_-]\{0,31\}')
+cli=$(conf CLI '/[A-Za-z0-9._/-]*')
+unit=$(conf UNIT '[A-Za-z0-9_.@-]*\.service')
+if [ -z "$user" ] || [ -z "$cli" ] || [ -z "$unit" ]; then say "$CONF needs CONSOLE_USER, CLI and UNIT"; exit 1; fi
+home=$(getent passwd "$user" | cut -d: -f6)
+uid=$(id -u "$user")
+[ -n "$home" ] && [ -n "$uid" ] || { say "no account $user"; exit 1; }
+
+# Root's folder with the copy in it first; only then may the user enter it.
+tmp=$(mktemp -d "$ROOT/run/choibot-first-start.XXXXXX")
+trap 'rm -rf "$tmp"' EXIT
+install -o "$user" -m 0600 "$SRC" "$tmp/first-start.json"
+chown "$user" "$tmp"
+# The file holds a hash only, and the copy is made: it goes now, whatever comes next.
+rm -f "$SRC"
+
+rc=0
+runuser -u "$user" -- env -i HOME="$home" USER="$user" LOGNAME="$user" PATH=/usr/bin:/bin LANG=C.UTF-8 \
+  "$cli" first-start "$tmp/first-start.json" || rc=$?
+if [ "$rc" -ne 0 ]; then say "first-start ended with code $rc"; exit "$rc"; fi
+
+# A console that runs already reads its new settings at a restart.
+if systemctl is-active --quiet "user@$uid.service"; then
+  systemctl --user -M "$user@" try-restart "$unit" || say "the restart of $unit failed"
+fi

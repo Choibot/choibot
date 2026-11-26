@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Fake `id` of the install test. `id -u` is 4242, so no path of the real user's service manager
+# (/run/user/<uid>) is ever built; with <root>/state/root it is 0 (a root login). All else is real.
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+if [ "$*" = -u ]; then if [ -f "$STATE/root" ]; then echo 0; else echo 4242; fi; exit 0; fi
+exec /usr/bin/id "$@"

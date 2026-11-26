@@ -1,0 +1,52 @@
+/* "Share outside" (QueueShare.tsx): the head's quiet action, the confirm card and the shared row
+   at the top of a ticket. The buttons take the Queue view's own .b / .pri / .ghost classes. */
+.head { gap: 6px; }
+/* A phone: the action at the end of the meta line, which keeps one row for it. */
+.phoneHead { flex: none; margin: -6px -8px -6px auto; min-height: 36px; }
+*:has(> .phoneHead) { flex-wrap: nowrap; }
+.dot { display: inline-block; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--ok); }
+.dot[data-tone="warn"] { background: var(--warn); }
+
+.card, .row {
+  display: grid; gap: 10px; padding: 14px 16px; border: 1px solid var(--line-2); border-radius: var(--radius);
+  background: var(--bg-1); font-size: var(--text-sm); line-height: 1.5;
+}
+.card p, .row p { margin: 0; }
+.title { margin: 0; color: var(--ink-0); font-size: var(--text-base); font-weight: var(--weight-semibold); line-height: 1.4; }
+.what, .hint, .once, .note, .ask { color: var(--ink-1); }
+.ask b { color: var(--ink-0); font-weight: var(--weight-medium); }
+.clean { display: flex; align-items: center; gap: 8px; color: var(--ink-0); }
+.reading { margin: 0; color: var(--ink-2); font-size: var(--text-sm); }
+.err { color: var(--err); overflow-wrap: anywhere; }
+.warn { color: var(--warn); }
+.note { overflow-wrap: anywhere; }
+
+/* The check's hits: one row each, the tick first, "Share it anyway" at the end. */
+.hits { display: grid; gap: 6px; }
+.hitsHead { color: var(--ink-0); font-weight: var(--weight-medium); }
+.hitList { display: grid; margin: 0; padding: 0; list-style: none; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.hit + .hit { border-top: 1px solid var(--line); }
+.hitLabel { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 10px; padding: 8px 10px; cursor: pointer; }
+.hitLabel input { margin: 3px 0 0; accent-color: var(--ink-0); }
+.hitText { min-width: 0; color: var(--ink-1); overflow-wrap: anywhere; }
+.hitText b { color: var(--ink-0); font-weight: var(--weight-medium); }
+.excerpt { font-family: var(--font-mono); font-size: var(--text-xs); }
+.anyway { color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; line-height: 21px; }
+
+.btns { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.btns a { gap: 5px; text-decoration: none; }
+
+/* The shared row: the state at the left, its buttons at the right; notes under both. */
+.row { grid-template-columns: minmax(0, 1fr) auto; align-items: center; column-gap: 12px; }
+.row > :not(.line):not(.btns) { grid-column: 1 / -1; }
+.line { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--ink-0); }
+.line b { font-weight: var(--weight-medium); }
+.meta { color: var(--ink-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.pw { padding: 1px 6px; border-radius: 4px; background: var(--bg-2); color: var(--ink-0); font-family: var(--font-mono); font-size: var(--text-xs); user-select: all; }
+
+/* A phone: full-width buttons with touch sizes, the row in one column. */
+[data-mobile] .card, [data-mobile] .row { padding: 12px 14px; }
+[data-mobile] .row { grid-template-columns: minmax(0, 1fr); }
+[data-mobile] .btns > * { flex: 1 1 auto; justify-content: center; min-height: 44px; }
+[data-mobile] .hitLabel { grid-template-columns: auto minmax(0, 1fr); padding: 10px; }
+[data-mobile] .anyway { grid-column: 2; line-height: 16px; }

@@ -1,0 +1,15 @@
+{
+  "full": [
+    "--append-system-prompt",
+    "SP",
+    "--dangerously-skip-permissions",
+    "--settings",
+    "/s.json",
+    "--resume",
+    "sid-1",
+    "go"
+  ],
+  "bare": [
+    "--dangerously-skip-permissions"
+  ]
+}

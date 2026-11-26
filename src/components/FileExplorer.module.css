@@ -1,0 +1,550 @@
+.wrap {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  height: 100%;
+  min-height: 0;
+  background: var(--bg-0);
+}
+
+/* ---- tree ---- */
+.tree {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  border-right: 1px solid var(--line);
+  background: var(--bg-1);
+}
+/* Headers: 52 px, like the pane header and the inspector's tabs. */
+.treeHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  height: 52px;
+  padding: 0 12px 0 18px;
+  border-bottom: 1px solid var(--line);
+}
+.treeRoot {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.vscode {
+  flex-shrink: 0;
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: none;
+  font: var(--weight-medium) var(--text-sm) var(--font-sans);
+  color: var(--ink-0);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+@media (hover: hover) { .vscode:hover { background: var(--bg-3); } }
+.vscode:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.headActions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.treeBody {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 0 0 12px;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---- collapsible sidebar sections ---- */
+.section {
+  border-bottom: 1px solid var(--line);
+  flex-shrink: 0;
+}
+.section:last-child {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-bottom: none;
+}
+/* Section labels as in the inspector ("Uncommitted"): small, dim, no band. */
+.sectionHead {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 12px 16px 4px 18px;
+}
+.sectionToggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+  text-align: left;
+}
+.sectionTitle {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+}
+@media (hover: hover) { .sectionToggle:hover .sectionTitle { color: var(--ink-1); } }
+.count {
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg-2);
+  color: var(--ink-1);
+  font: var(--weight-medium) var(--text-xs)/18px var(--font-sans);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.miniBtn {
+  flex-shrink: 0;
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  font-size: var(--text-sm);
+  padding: 0 2px;
+  line-height: 1;
+}
+@media (hover: hover) { .miniBtn:hover { color: var(--ink-0); } }
+.sectionBody {
+  max-height: 220px;
+  overflow: auto;
+  padding: 2px 0 6px;
+}
+.treeNodes {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 4px 0 0;
+}
+
+/* ---- changes ---- */
+.changeRow {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 16px 0 18px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+@media (hover: hover) { .changeRow:hover { background: var(--bg-2); } }
+/* Status letters as in the inspector: mono, dim; the colour is in the counts. */
+.statusGlyph {
+  width: 10px;
+  flex-shrink: 0;
+  font: var(--weight-medium) var(--text-xs) var(--font-mono);
+}
+.stM, .stA, .stD, .stR, .stU { color: var(--ink-2); }
+
+.pathLabel {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.pathDir { color: var(--ink-2); }
+.pathBase { color: var(--ink-0); font-weight: var(--weight-medium); }
+
+/* ---- search ---- */
+.searchInputWrap {
+  position: relative;
+  padding: 4px 12px 8px 18px;
+}
+.searchInput {
+  width: 100%;
+  height: 30px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 0 24px 0 10px;
+  font: var(--text-sm) var(--font-sans);
+  color: var(--ink-0);
+  outline: none;
+}
+.searchInput::placeholder { color: var(--ink-2); }
+.searchInput:focus { border-color: var(--ink-2); }
+.clearBtn {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  color: var(--ink-2);
+  cursor: pointer;
+  display: grid;
+  padding: 0 2px;
+}
+@media (hover: hover) { .clearBtn:hover { color: var(--ink-0); } }
+.searchResults {
+  max-height: 260px;
+  overflow: auto;
+  padding-bottom: 6px;
+}
+.searchGroup { margin-bottom: 2px; }
+.searchFileHead {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px 3px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  background: var(--bg-1);
+  position: sticky;
+  top: 0;
+}
+.matchRow {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 1px 10px 1px 22px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.6;
+  color: var(--ink-1);
+}
+@media (hover: hover) { .matchRow:hover { background: var(--bg-3); } }
+.matchLine {
+  flex-shrink: 0;
+  color: var(--ink-2);
+  min-width: 28px;
+  text-align: right;
+}
+.matchText {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 0;
+}
+.hit {
+  background: color-mix(in srgb, var(--warn) 32%, transparent);
+  color: var(--ink-0);
+  border-radius: 2px;
+  padding: 0 1px;
+}
+.selectedFaint { background: var(--bg-2); }
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  min-height: 26px;
+  padding: 0 8px;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-1);
+}
+@media (hover: hover) { .row:hover { background: var(--bg-2); } }
+.row:focus-visible, .changeRow:focus-visible { outline: 2px solid var(--ink-1); outline-offset: -2px; }
+.dir { color: var(--ink-0); }
+.file { color: var(--ink-1); }
+.selected { background: var(--bg-3); color: var(--ink-0); }
+@media (hover: hover) { .selected:hover { background: var(--bg-3); } }
+
+.caret {
+  width: 12px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+}
+.fileGlyph {
+  width: 12px;
+  flex-shrink: 0;
+  color: var(--ink-2);
+  text-align: center;
+}
+.name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.muted {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  padding: 4px 12px;
+}
+
+/* ---- viewer ---- */
+.viewer {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  background: var(--bg-0);
+}
+.viewerHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  height: 52px;
+  padding: 0 12px 0 18px;
+  background: var(--bg-1);
+  border-bottom: 1px solid var(--line);
+}
+.viewerPath {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.viewerSize {
+  flex-shrink: 0;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+}
+.viewerBody {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+}
+.placeholder {
+  margin: auto;
+  padding: 24px;
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+}
+
+/* line-number gutter + highlighted code share one scroll container and the
+   exact same line-height so they stay aligned. */
+.codeScroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+}
+.gutter {
+  margin: 0;
+  padding: 12px 10px 20px;
+  text-align: right;
+  color: var(--ink-2);
+  background: var(--bg-1);
+  border-right: 1px solid var(--line);
+  user-select: none;
+  white-space: pre;
+  flex-shrink: 0;
+}
+.code {
+  margin: 0;
+  padding: 12px 16px 20px;
+  white-space: pre;
+  flex: 1;
+  min-width: 0;
+}
+.code code {
+  background: transparent !important;
+  padding: 0 !important;
+  font: inherit;
+}
+.gutter,
+.code,
+.code code {
+  font-family: var(--font-mono);
+  line-height: 1.55;
+}
+
+/* per-line wrappers so we can scroll to + flash a target line */
+.code code { display: block; }
+.codeLine { display: block; }
+.flash {
+  background: color-mix(in srgb, var(--ink-0) 10%, transparent);
+  box-shadow: inset 2px 0 0 var(--ink-2);
+  animation: lineFlash 1.6s ease-out;
+}
+@keyframes lineFlash {
+  0% { background: color-mix(in srgb, var(--ink-0) 20%, transparent); }
+  100% { background: transparent; }
+}
+/* Cmd/Ctrl-hover hints that identifiers are clickable. */
+@media (hover: hover) { .navHint:hover { cursor: text; } }
+
+/* ---- Quick Open overlay ---- */
+.overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: color-mix(in srgb, var(--bg-0) 55%, transparent);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 12vh;
+}
+.palette {
+  width: min(620px, 90vw);
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), var(--shadow-pop);
+  overflow: hidden;
+}
+.paletteInput {
+  width: 100%;
+  border: none;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+  padding: 12px 14px;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--ink-0);
+  outline: none;
+}
+.paletteList {
+  max-height: 50vh;
+  overflow: auto;
+  padding: 4px 0;
+}
+.paletteRow {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 5px 14px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+}
+.paletteActive { background: var(--bg-3); }
+.paletteActive .pathBase { color: var(--ink-0); }
+
+/* ---- go-to-definition note + popup ---- */
+.defNote {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 20;
+  background: var(--bg-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  padding: 7px 14px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+  box-shadow: var(--shadow), var(--shadow-pop);
+}
+.popupBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+}
+.defPopup {
+  position: fixed;
+  z-index: 41;
+  width: 320px;
+  max-height: 240px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-1);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  box-shadow: var(--shadow), var(--shadow-pop);
+}
+.defPopupHead {
+  padding: 8px 12px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-2);
+}
+.defPopupHead code {
+  font-family: var(--font-mono);
+  color: var(--ink-0);
+}
+.defPopupList { overflow: auto; padding: 4px 0; }
+.defPopupRow {
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+  width: 100%;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  padding: 5px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-1);
+}
+@media (hover: hover) { .defPopupRow:hover { background: var(--bg-3); } }
+
+.back { display: none; }
+
+@media (max-width: 768px) {
+  .wrap { grid-template-columns: 1fr; }
+  .tree { display: flex; }
+  .viewer { display: none; }
+  .wrap[data-open="true"] .tree { display: none; }
+  .wrap[data-open="true"] .viewer { display: flex; }
+
+  .back {
+    display: inline-flex; align-items: center; gap: 4px; flex: none;
+    background: transparent; border: 1px solid var(--line); border-radius: var(--radius-sm);
+    color: var(--ink-0); font-family: var(--font-sans); font-size: var(--text-sm);
+    padding: 6px 10px; min-height: 36px; cursor: pointer;
+  }
+}
+
+/* The phone keeps its header heights (its layout is a later PR). */
+@media (max-width: 768px) {
+  .treeHead { height: auto; padding: 8px 10px; }
+  .viewerHead { height: auto; padding: 8px 14px; }
+}
+
+/* Phone: the tree fills the screen, so its right hairline would sit on the screen edge. */
+@media (max-width: 768px) {
+  .tree { border-right: none; }
+}

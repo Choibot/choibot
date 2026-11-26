@@ -1,0 +1,120 @@
+/* src/components/PromptCard.module.css — the prompt card above the composer (A · Inset):
+   a raised card, the question with a blue dot, the command in mono, the options
+   as buttons with their key caps. */
+.card {
+  min-width: 0;
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-0);
+}
+.question {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--turn); }
+/* What the question is about: the folder, the command. */
+.detail {
+  margin: 0;
+  max-height: 96px;
+  overflow: auto;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  font: var(--weight-regular) var(--text-xs)/1.5 var(--font-mono);
+  color: var(--ink-0);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* The screen of an unknown prompt, as the terminal shows it. */
+.screen {
+  margin: 0;
+  padding: 8px 10px;
+  max-height: min(34vh, 260px);
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  font: var(--weight-regular) var(--text-xs)/1.5 var(--font-mono);
+  color: var(--ink-1);
+  white-space: pre;
+  tab-size: 8;
+}
+.screen b { font-weight: var(--weight-semibold); color: var(--ink-0); }
+.screen:focus-visible { outline: 1px solid var(--line-2); }
+
+.acts { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.acts[data-layout="column"] { flex-direction: column; align-items: stretch; }
+/* The buttons: 28 px, radius 7. The yes answer is inverted, the no answer quiet. */
+.btn {
+  max-width: 100%;
+  min-height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  font: var(--weight-medium) var(--text-sm)/1.35 var(--font-sans);
+  color: var(--ink-0);
+  background: none;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 120ms ease, border-color 120ms ease, opacity 120ms ease;
+}
+.label { min-width: 0; overflow-wrap: anywhere; }
+.acts[data-layout="column"] .label { flex: 1; }
+@media (hover: hover) { .btn:hover:not(:disabled) { background: var(--bg-3); } }
+.btn:active:not(:disabled) { background: var(--bg-1); }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.btn:disabled { opacity: 0.5; cursor: default; }
+.pri { background: var(--inv); border-color: transparent; color: var(--inv-ink); }
+@media (hover: hover) { .pri:hover:not(:disabled) { background: var(--inv-hover); } }
+.pri:active:not(:disabled) { background: var(--inv); }
+.ghost { background: none; border-color: transparent; color: var(--ink-1); }
+@media (hover: hover) { .ghost:hover:not(:disabled) { color: var(--ink-0); } }
+/* The key cap of an option: its number. */
+.kbd {
+  flex: none;
+  margin-left: 2px;
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  font: var(--weight-medium) 10.5px/16px var(--font-mono);
+  color: var(--ink-2);
+}
+.pri .kbd { color: var(--inv-ink); border-color: color-mix(in srgb, var(--inv-ink) 35%, transparent); }
+.key { min-width: 34px; justify-content: center; text-align: center; }
+.note { margin: 0; font-size: var(--text-xs); color: var(--ink-1); }
+.held { margin: 0; font-size: var(--text-xs); color: var(--ink-2); }
+
+@media (prefers-reduced-motion: reduce) { .btn { transition: none; } }
+
+@media (max-width: 768px) {
+  .question { font-size: var(--text-base); }
+  .detail, .screen { font-size: var(--text-xs); }
+  /* Fingers: a full-height target, no key caps (no keyboard), no sticky hover after a tap. */
+  .btn { min-height: 38px; padding: 8px 13px; font-size: var(--text-sm); }
+  .kbd { display: none; }
+  .key { min-width: 46px; }
+  .acts { gap: 8px; }
+}
+@media (hover: none) {
+  .btn:hover:not(:disabled) { background: none; }
+  .pri:hover:not(:disabled) { background: var(--inv); }
+  .ghost:hover:not(:disabled) { background: none; color: var(--ink-1); }
+}

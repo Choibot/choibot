@@ -1,0 +1,80 @@
+/* src/components/LoginPick.module.css — the Claude login of a persistent agent: a quiet button in
+   the desktop pane header (the look of the header's Interrupt and Stop), and the list of logins
+   (under the button, or under the phone header's "more" button). */
+.wrap { position: relative; flex: none; min-width: 0; }
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  max-width: 180px;
+  padding: 0 8px 0 10px;
+  font: var(--weight-regular) var(--text-sm) var(--font-sans);
+  color: var(--ink-1);
+  white-space: nowrap;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background-color 120ms ease, color 120ms ease;
+}
+@media (hover: hover) { .btn:hover { background: var(--bg-3); color: var(--ink-0); } }
+.btn[aria-expanded="true"] { background: var(--bg-2); color: var(--ink-0); }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The login of the agent is signed out: one dot, the colour of a warning. */
+.dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--warn); }
+
+.menu {
+  position: absolute;
+  top: calc(100% + 4px);
+  right: 0;
+  z-index: 40;
+  width: 300px;
+  max-width: calc(100vw - 24px);
+  display: flex;
+  flex-direction: column;
+  padding: 4px;
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow), var(--shadow-pop);
+  font-family: var(--font-sans);
+  animation: pickIn 0.12s ease-out both;
+}
+.head { padding: 6px 8px 4px; font-size: var(--text-xs); color: var(--ink-2); }
+/* A row on two lines: the name of the login, then its state in the quiet colour. The state always
+   shows; a long name wraps. */
+.item {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px 6px 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--ink-0);
+  font: var(--weight-regular) var(--text-sm) var(--font-sans);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) { .item:hover:not(:disabled) { background: var(--bg-2); } }
+.item:active:not(:disabled) { background: var(--bg-2); }
+.item:disabled { cursor: default; color: var(--ink-2); }
+.item[aria-checked="true"] { color: var(--ink-0); }
+.item:focus-visible { outline: 2px solid var(--ink-1); outline-offset: -2px; }
+.check { width: 16px; height: 18px; flex: none; display: grid; place-items: center; }
+.text { min-width: 0; display: grid; gap: 1px; line-height: 18px; }
+.label { overflow-wrap: anywhere; }
+.state { font-size: var(--text-xs); line-height: 16px; color: var(--ink-2); }
+.note { margin-top: 4px; padding: 7px 8px 5px; border-top: 1px solid var(--line); font-size: var(--text-xs); line-height: 1.45; color: var(--ink-2); }
+.note[data-err] { color: var(--err); }
+@media (pointer: coarse) { .item { min-height: 44px; } }
+@keyframes pickIn {
+  from { opacity: 0; transform: translateY(-4px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) { .menu { animation: none; } }

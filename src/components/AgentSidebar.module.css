@@ -1,0 +1,677 @@
+.launcher {
+  display: grid;
+  /* bound the single column to the container so long <option> text can't
+     stretch the track and overflow the sidebar */
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  padding: 14px;
+  border-bottom: 1px solid var(--line);
+}
+.h {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  margin: 0 0 2px;
+  font-weight: var(--weight-semibold);
+}
+.control {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  height: 32px;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-0);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: 0 10px;
+  outline: none;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+/* truncate the selected long repo/branch label instead of overflowing */
+select.control { text-overflow: ellipsis; }
+
+/* ── Custom dropdown (always opens below, styled caret divider) ── */
+.dd { position: relative; min-width: 0; }
+.ddBtn {
+  width: 100%;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-0);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  padding: 0 0 0 10px;
+  height: 32px;
+  cursor: pointer;
+  text-align: left;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+@media (hover: hover) { .ddBtn:hover { border-color: var(--ink-2); } }
+.ddBtn:disabled { opacity: 0.55; cursor: not-allowed; }
+@media (hover: hover) { .ddBtn:disabled:hover { border-color: var(--line-2); } }
+.ddValue, .ddPlaceholder {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ddPlaceholder { color: var(--ink-2); }
+/* caret separated from the value by a divider — the "border after the stroke down" */
+.ddCaret {
+  flex: none;
+  display: flex;
+  align-items: center;
+  align-self: stretch;
+  padding: 0 10px;
+  margin-left: 8px;
+  border-left: 1px solid var(--line-2);   /* static divider — never rotates */
+  color: var(--ink-1);
+}
+/* only the chevron rotates */
+.ddCaretIcon { display: block; transition: transform 0.18s ease; }
+.ddCaretOpen { transform: rotate(180deg); }
+.ddMenu {
+  position: absolute;
+  top: calc(100% + 5px);   /* always BELOW the control */
+  left: 0;
+  right: 0;
+  z-index: 60;
+  max-height: 260px;
+  overflow-y: auto;
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  padding: 4px;
+  box-shadow: var(--shadow), var(--shadow-pop);
+  animation: msgIn 0.14s ease both;
+}
+.ddItem {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: 30px;
+  padding: 0 9px;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@media (hover: hover) { .ddItem:hover { background: var(--bg-3); color: var(--ink-0); } }
+.ddItemActive { color: var(--ink-0); font-weight: var(--weight-medium); }
+.ddGroup {
+  padding: 6px 12px 3px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  color: var(--ink-2);
+  user-select: none;
+}
+.ddEmpty { color: var(--ink-2); font-size: var(--text-sm); padding: 7px 9px; }
+.control:focus { border-color: var(--ink-2); box-shadow: 0 0 0 3px color-mix(in srgb, var(--ink-0) 8%, transparent); }
+textarea.control { height: auto; padding: 7px 10px; resize: vertical; min-height: 58px; font-family: var(--font-sans); }
+.start {
+  background: var(--inv);
+  color: var(--inv-ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  height: 32px;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+@media (hover: hover) { .start:hover:not(:disabled) { background: var(--inv-hover); } }
+.start:disabled { opacity: 0.4; cursor: not-allowed; }
+
+/* ── Add repo ─────────────────────────────────────────── */
+.addRepo {
+  background: transparent;
+  border: none;
+  align-self: flex-start;
+  justify-self: start;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  padding: 0;
+  cursor: pointer;
+  transition: color 0.15s;
+}
+@media (hover: hover) { .addRepo:hover { color: var(--ink-0); } }
+/* The launcher's links to Settings (Repos, Claude accounts): quiet text, one line. */
+.manage { display: flex; flex-wrap: wrap; gap: 4px 16px; }
+.manageLink {
+  padding: 0; border: none; background: none; color: var(--ink-2); cursor: pointer;
+  font: var(--weight-regular) var(--text-xs)/1.4 var(--font-sans);
+  text-decoration: underline; text-underline-offset: 2px; transition: color 0.15s;
+}
+@media (hover: hover) { .manageLink:hover { color: var(--ink-0); } }
+.manageLink:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.addRow {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+.addRow .control { flex: 1; min-width: 0; }
+.addBtn {
+  flex: none;
+  background: var(--inv);
+  color: var(--inv-ink);
+  border: none;
+  border-radius: var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  height: 32px;
+  padding: 0 12px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+.addBtn:disabled { opacity: 0.4; cursor: not-allowed; }
+.addCancel {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 32px;
+  height: 32px;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+  padding: 0 10px;
+  cursor: pointer;
+  transition: background-color 0.15s, color 0.15s;
+}
+@media (hover: hover) { .addCancel:hover { background: var(--bg-3); color: var(--ink-0); } }
+.addCancel:disabled { opacity: 0.4; cursor: not-allowed; }
+.addCancel[aria-label] { padding: 0; }
+.addErr { color: var(--err); font-size: var(--text-xs); margin: -3px 0 0; word-break: break-word; }
+.hint { font-family: var(--font-sans); color: var(--ink-1); font-size: var(--text-xs); margin: -3px 0 0; line-height: 1.4; }
+.newBranch { display: flex; flex-direction: column; gap: 6px; }
+
+/* Runtime picker — a field, not a header: the group wears .control's own box so
+   it reads as one more thing you fill in. Every other row in the launcher names
+   itself from inside its own box (the dropdown/input placeholders), so this one
+   carries an inline name in the same muted mono, and the options drop the
+   uppercase + 0.14em recipe that .h and .listH own in this sheet — an unselected
+   CODEX in heading type read as a heading for the row below it. The Changes |
+   Plan underline was tried here first and failed the same way. */
+.runtimes {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  height: 32px;
+  padding: 2px 2px 2px 0;   /* the label carries its own 10px text inset */
+  background: var(--bg-2);
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+}
+/* Reads as .ddPlaceholder does — the field's name, not one of its values — and
+   the divider is .ddCaret's, so "name | control" is a shape the sheet already
+   uses rather than a new one. */
+.runtimesLabel {
+  flex: none;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  margin-right: 6px;
+  border-right: 1px solid var(--line-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.runtime {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  padding: 0 8px;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);   /* value type, like .ddValue — an option, not a heading */
+  color: var(--ink-2);
+}
+@media (hover: hover) { .runtime:hover { color: var(--ink-1); } }
+/* --bg-3 on --bg-2 measures 1.1:1, so the fill alone carries no "pressed" read.
+   The hairline the sheet already uses for chips and ghost buttons does, at 1px. */
+.runtimeActive {
+  background: var(--bg-1);
+  color: var(--ink-0);
+  box-shadow: var(--shadow);
+}
+
+/* Account row: "name | control", the shape .runtimes already uses — the login
+   dropdown shows an email, which does not name the field on its own. */
+.acctRow { display: flex; align-items: stretch; min-width: 0; }
+.acctRow > :last-child { flex: 1; min-width: 0; }
+.acctLabel {
+  flex: none;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  color: var(--ink-2);
+}
+.acctRow .ddBtn { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+
+/* ── List: the sidebar rows (A · Inset) ──────────────────
+   One 30 px row per thing you go to; status is a dot, and the one count (open
+   tickets) is a pill in the column at the right edge. The row actions (Stop,
+   Resume, Close, drag) show on hover — always on touch. */
+.list { display: flex; flex-direction: column; padding: 0 0 8px; min-width: 0; }
+.sec {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 0;
+  padding: 14px 8px 4px;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--ink-2);
+}
+.none { font-family: var(--font-sans); color: var(--ink-2); font-size: var(--text-xs); padding: 4px 8px 4px 33px; line-height: 1.4; }
+.row {
+  position: relative;
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 30px;
+  padding: 0 4px 0 8px;
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  transition: background-color 0.12s, color 0.12s;
+}
+.rowSel { background: var(--bg-3); color: var(--ink-0); }
+/* A lead row: its avatar is 24 px, so the row is 2 px higher. `--av-ring` is the colour behind
+   the avatar, for the ring of its status dot (LeadAvatar). */
+.leadRow { height: 32px; --av-ring: var(--bg-0); }
+.leadRow.rowSel { --av-ring: var(--bg-3); }
+.sub { padding-left: 28px; }
+/* The row's main button: icon or dot, name, inline meta. It fills the row so the
+   whole line is the hit area. */
+.pick {
+  flex: 1;
+  min-width: 0;
+  align-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 4px 0 0;
+  background: transparent;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--radius-sm);
+}
+.pick:focus-visible, .fold:focus-visible, .act:focus-visible, .closedH:focus-visible {
+  outline: 1.5px solid var(--ink-2);
+  outline-offset: -1.5px;
+}
+.nm { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mt {
+  flex: none;
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  padding-right: 4px;
+}
+.tag { flex: none; font-size: var(--text-xs); color: var(--ink-2); white-space: nowrap; }
+/* New output since the row was last opened: the name in the bright ink, no count. */
+.nmNew { color: var(--ink-0); font-weight: var(--weight-medium); }
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+/* Status dot (lib/agentGroups statusDot). Colour only at dot size. */
+.dotw { flex: none; width: 16px; display: grid; place-items: center; }
+.dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.d_turn { background: var(--turn); }
+.d_run { background: var(--run); box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 28%, transparent); }
+.d_ok { background: var(--ok); }
+.d_err { background: var(--err); }
+.d_idle { background: transparent; border: 1.5px solid var(--idle); }
+.d_wait { background: var(--warn); }
+
+/* Counts: a quiet pill; the Queue count is inverted. */
+.pill {
+  flex: none;
+  min-width: 18px;
+  padding: 0 6px;
+  border-radius: 9px;
+  background: var(--bg-3);
+  color: var(--ink-1);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 18px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.pillInv { background: var(--inv); color: var(--inv-ink); }
+/* The Server row: a dot only while something on the server needs the user. */
+.needs { flex: none; width: 7px; height: 7px; margin-right: 5px; border-radius: 50%; background: var(--warn); }
+.needs[data-level="error"] { background: var(--err); }
+/* The count column: the right edge of the Queue row's own pill (which sits in its
+   button), kept with no count too, so a reminder never takes a count's place. */
+.cnt { flex: none; min-width: 18px; display: flex; justify-content: flex-end; margin-right: 4px; }
+.rowSel .pill:not(.pillInv) { background: var(--bg-1); }
+
+/* Row actions: Stop / Resume / Reopen / Delete / Close. */
+.acts { flex: none; display: flex; align-items: center; gap: 2px; }
+.act {
+  flex: none;
+  height: 22px;
+  padding: 0 6px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--ink-2);
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+@media (hover: hover) { .act:hover { background: var(--bg-1); color: var(--ink-0); } }
+.actIcon { width: 22px; padding: 0; }
+@media (hover: hover) { .actDel:hover { color: var(--err); } }
+.actArm { background: var(--err); color: var(--inv-ink); }
+@media (hover: hover) { .actArm:hover { background: var(--err); color: var(--inv-ink); } }
+
+/* Drag grip: in the row's left padding, over the dot column's edge. It owns the
+   drag gesture, so it must not scroll the list on touch. */
+.grip {
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-2);
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.sub .grip { left: 14px; }
+.rowDrag { background: var(--bg-3); box-shadow: inset 0 0 0 1px var(--line-2); }
+.rowDrag .grip { cursor: grabbing; color: var(--ink-0); }
+
+/* Pointer devices: hover shows the row actions and the grip. Touch devices get
+   no :hover rules on the row, so one tap selects (no "tap twice" bug). */
+@media (hover: hover) {
+  .row:hover:not(.rowSel) { background: var(--side-hover); }
+  .leadRow:hover:not(.rowSel) { --av-ring: var(--side-hover); }
+  .row:hover .pill:not(.pillInv) { background: var(--bg-1); }
+  .row:hover { color: var(--ink-0); }
+  .acts { display: none; }
+  .row:hover .acts, .row:has(:focus-visible) .acts, .actsOn { display: flex; }
+  .grip { opacity: 0; transition: opacity 0.12s; }
+  .row:hover .grip, .rowDrag .grip { opacity: 1; }
+}
+
+/* Lead row: the chevron folds its workers. */
+.fold {
+  flex: none;
+  width: 16px;
+  height: 22px;
+  margin-right: 5px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+@media (hover: hover) { .fold:hover { color: var(--ink-0); } }
+
+/* Closed: a toggle row at the bottom, and its rows a step quieter. */
+.closedH {
+  width: 100%;
+  gap: 9px;
+  padding-right: 8px;
+  background: transparent;
+  border: none;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+.closedH .dotw { color: var(--ink-2); }
+.rowClosed { color: var(--ink-2); }
+
+/* Time to the agent's next reminder (chief on): quiet, never a call to act. */
+.remind {
+  flex: none;
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-2);
+  white-space: nowrap;
+  padding: 0 2px;
+}
+.remindGlyph { display: inline-flex; vertical-align: -2px; opacity: 0.75; }
+/* Paired device: the badge is also its cancel control. Hover shows × over
+   the time (no layout shift); armed it reads "Sure?" in red, as Delete does. */
+.remindBtn {
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  padding: 1px 3px;
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
+}
+.remindWhen { position: relative; }
+.remindX {
+  position: absolute;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+}
+.remindBtn:focus-visible { border-color: var(--err); color: var(--err); outline: none; }
+.remindBtn:focus-visible .remindTime { visibility: hidden; }
+.remindBtn:focus-visible .remindX { display: flex; }
+@media (hover: hover) {
+  .remindBtn:hover { border-color: var(--err); color: var(--err); }
+  .remindBtn:hover .remindTime { visibility: hidden; }
+  .remindBtn:hover .remindX { display: flex; }
+}
+.remindArm {
+  border-color: var(--err);
+  color: var(--inv-ink);
+  background: var(--err);
+  font-weight: var(--weight-semibold);
+}
+@media (hover: hover) {
+  .remindArm:hover {
+    border-color: var(--err);
+    color: var(--inv-ink);
+    background: var(--err);
+    font-weight: var(--weight-semibold);
+  }
+}
+
+/* Phone: the home list (A · Inset phone screen). Rows of 46 px in ink, 18 px icon column,
+   quiet section headings; the row actions show in edit mode only (the Agents heading's Edit). */
+.list[data-phone] { padding: 0 0 12px; }
+.list[data-phone] .sec { padding: 16px 16px 4px; font-size: var(--text-sm); }
+.list[data-phone] .none { padding: 4px 16px 4px 45px; font-size: var(--text-sm); }
+.list[data-phone] .row {
+  height: auto;
+  min-height: 46px;
+  gap: 11px;
+  padding: 0 16px;
+  border-radius: 0;
+  color: var(--ink-0);
+  font-size: var(--text-phone);
+  -webkit-tap-highlight-color: transparent;
+}
+.list[data-phone] .leadRow { min-height: 52px; }
+.list[data-phone] .leadRow:active { --av-ring: var(--bg-2); }
+.list[data-phone] .leadRow.rowSel { --av-ring: var(--bg-0); }
+.list[data-phone] .sub { padding-left: 40px; }
+.list[data-phone] .pick { gap: 11px; padding: 0; touch-action: manipulation; }
+.list[data-phone] .dotw { width: 18px; color: var(--ink-1); }
+.list[data-phone] .mt { font-size: var(--text-sm); padding-right: 0; }
+.list[data-phone] .cnt { margin-right: 0; }
+.list[data-phone] .nmNew { font-weight: var(--weight-semibold); }
+.list[data-phone] .rowSel { background: none; }
+.list[data-phone] .row:active { background: var(--bg-2); }
+.list[data-phone] .rowClosed, .list[data-phone] .closedH { color: var(--ink-2); }
+.list[data-phone] .closedH .dotw { color: var(--ink-2); }
+/* The lead row's chevron sits in the icon column; its button is a 44 px target. */
+.list[data-phone] .fold { width: 34px; height: 44px; margin: 0 -8px; }
+.list[data-phone] .remindBtn { padding: 6px 4px; }
+.list[data-phone]:not([data-editing]) .acts, .list[data-phone]:not([data-editing]) .grip { display: none; }
+.list[data-editing] .acts { display: flex; }
+.list[data-editing] .grip { opacity: 1; width: 16px; }
+.list[data-editing] .sub .grip { left: 22px; }
+.list[data-phone] .act { height: 34px; padding: 0 10px; font-size: var(--text-sm); }
+.list[data-phone] .actIcon { width: 34px; padding: 0; }
+.edit {
+  min-height: 32px;
+  margin: -8px -6px -8px 0;
+  padding: 0 6px;
+  background: none;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  font: var(--weight-medium) var(--text-sm) var(--font-sans);
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.edit[aria-pressed="true"] { color: var(--ink-0); font-weight: var(--weight-semibold); }
+.edit:active { background: var(--bg-2); }
+.edit:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: -1.5px; }
+
+/* ── New agent dialog (the sidebar's "+") ─────────────── */
+.dialog {
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100dvh - 64px);
+  padding: 0;
+  border: none;
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  color: var(--ink-0);
+  box-shadow: var(--shadow), var(--shadow-pop);
+  /* The dropdown menus open below their control: let them leave the box. */
+  overflow: visible;
+}
+.dialog::backdrop { background: color-mix(in srgb, var(--bg-0) 55%, transparent); }
+.dialog[open] { animation: dialogIn 0.16s ease-out both; }
+.dialogHead {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 48px;
+  padding: 0 10px 0 16px;
+  border-bottom: 1px solid var(--line);
+}
+.dialogTitle { flex: 1; margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.dialogClose {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  cursor: pointer;
+}
+@media (hover: hover) { .dialogClose:hover { background: var(--bg-3); color: var(--ink-0); } }
+.dialog .launcher { padding: 16px; border-bottom: none; }
+/* Phone: the New agent form is a full-screen sheet over the visible area. */
+@media (max-width: 768px) {
+  .dialog {
+    inset: 0;
+    width: 100%;
+    max-width: none;
+    height: var(--app-vh, 100dvh);
+    max-height: none;
+    margin: var(--app-vv-top, 0px) 0 0;
+    border-radius: 0;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .dialog[open] { animation: sheetUp 0.26s cubic-bezier(0.32, 0.72, 0, 1) both; }
+  .dialogHead {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    height: auto;
+    min-height: 52px;
+    padding: env(safe-area-inset-top, 0px) 6px 0 16px;
+    background: var(--bg-1);
+  }
+  .dialogTitle { font-size: var(--text-phone); }
+  .dialogClose { width: 44px; height: 44px; }
+  /* Touch size: 44 px fields and buttons, 16 px text (no zoom into a field). */
+  .dialog .control, .dialog .ddBtn, .dialog .start, .dialog .addBtn, .dialog .addCancel, .dialog .runtimes { height: 44px; min-width: 44px; font-size: var(--text-lg); }
+  .dialog .ddItem { line-height: 44px; font-size: var(--text-lg); }
+  .dialog .runtimesLabel, .dialog .runtime, .dialog .acctLabel { font-size: var(--text-lg); }
+  .dialog .addRepo { min-height: 44px; font-size: var(--text-lg); }
+  .dialog .manageLink { min-height: 36px; font-size: var(--text-sm); }
+  .dialog .hint, .dialog .addErr { font-size: var(--text-sm); }
+}
+@keyframes sheetUp {
+  from { transform: translateY(100%); }
+  to   { transform: none; }
+}
+@keyframes dialogIn {
+  from { opacity: 0; transform: translateY(6px) scale(0.98); }
+  to   { opacity: 1; transform: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .dialog[open] { animation: none; }
+}

@@ -1,0 +1,225 @@
+/* A · Inset — neutral greys (Vercel-style black and white). Colour only at
+   dot size: blue = your turn, green = done, red = error, amber = waiting.
+   Primary buttons are inverted (--inv / --inv-ink). The grey names keep their
+   old levels: --bg-0 canvas, --bg-1 panel, --bg-2 raise, --bg-3 hover;
+   --ink-0/1/2 are the three ink levels. */
+:root {
+  --bg-0: #0a0a0a;
+  --bg-1: #111112;
+  --bg-2: #1b1b1c;
+  --bg-3: #1e1e1f;
+  --line: #ffffff12;
+  --line-2: #ffffff21;
+  --ink-0: #ededed;
+  --ink-1: #a3a3a3;
+  --ink-2: #6e6e6e;
+  --inv: #ededed;
+  --inv-ink: #0a0a0a;
+  --inv-hover: #d4d4d4;
+  --shadow: 0 0 0 1px #ffffff10;
+  /* Floating layers (menus, dialogs, sheets) and the dim layer under a sheet. */
+  --shadow-pop: 0 16px 40px -12px rgb(0 0 0 / 0.55);
+  --scrim: rgb(0 0 0 / 0.5);
+  /* A sidebar row under the pointer (the sidebar sits on the canvas). */
+  --side-hover: var(--bg-2);
+
+  /* Status (dots, counts, diff numbers). */
+  --turn: #3d8bff;
+  --run: #a3a3a3;
+  --ok: #3fb35a;
+  --err: #f05252;
+  --idle: #5a5a5a;
+  --warn: #e5a23a;
+  --add: #4fbf6a;
+  --del: #f06a6a;
+
+  /* Terminal chrome (xterm canvas bg + attach/search controls). The xterm ANSI
+     palette itself lives in XtermTerminal.tsx and switches in JS; keep its
+     background equal to --term-bg. */
+  --term-bg: var(--bg-0);
+  --term-fg: var(--ink-0);
+  --term-chrome: var(--bg-1);
+  --term-border: var(--line);
+  --term-muted: var(--ink-2);
+
+  /* Type: Geist only (next/font/local, src/app/fonts.ts); Geist Mono for
+     branches, paths, commands and code. Five sizes, three weights. */
+  --font-sans: var(--font-geist), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, "SF Mono", Menlo, monospace;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-base: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+  /* Phone screens only: rows and header titles at touch size, their status
+     lines, and the home list's large title. */
+  --text-phone: 15.5px;
+  --text-phone-body: 15px;
+  --text-phone-sm: 12.5px;
+  --text-title: 30px;
+  --weight-bold: 700;
+
+  /* Corners: 7 for controls, 12 for panels and cards. */
+  --radius-sm: 7px;
+  --radius: 12px;
+}
+
+/* Light theme — applied when <html data-theme="light"> (set before paint by the
+   inline script in layout.tsx, then by ThemeProvider). Only the colours differ;
+   every var()/color-mix() consumer adapts automatically. */
+:root[data-theme="light"] {
+  --bg-0: #f3f3f3;
+  --bg-1: #ffffff;
+  --bg-2: #f3f3f3;
+  --bg-3: #ececec;
+  --line: #0000000f;
+  --line-2: #0000001c;
+  --ink-0: #171717;
+  --ink-1: #5c5c5c;
+  --ink-2: #8f8f8f;
+  --inv: #171717;
+  --inv-ink: #ffffff;
+  --inv-hover: #383838;
+  --shadow: 0 1px 2px #0000000a, 0 0 0 1px #0000000f;
+  --shadow-pop: 0 12px 32px -12px rgb(0 0 0 / 0.14);
+  --scrim: rgb(0 0 0 / 0.2);
+  --side-hover: var(--bg-3);
+
+  --turn: #0a6be0;
+  --run: #5c5c5c;
+  --ok: #1d8a3d;
+  --err: #d42a2a;
+  --idle: #b0b0b0;
+  --warn: #b06d00;
+  --add: #1d8a3d;
+  --del: #cf2c2c;
+
+  --term-bg: var(--bg-1);
+  --term-chrome: var(--bg-2);
+}
+
+* { box-sizing: border-box; }
+
+/* Form controls do not inherit the font by default (the UA gives them Arial). */
+button, input, select, textarea { font-family: inherit; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  height: 100%;
+  /* The page itself never scrolls: the shell is one fixed-height frame and its
+     regions own their scroll. On a phone this also stops the rubber band of the
+     whole page and pull-to-refresh. */
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+/* A native <select> in the console look: no OS chevron, our own drawn with two
+   token-coloured gradients (it follows the theme). */
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 26px !important;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-1) 50%), linear-gradient(135deg, var(--ink-1) 50%, transparent 50%);
+  background-position: calc(100% - 14px) 50%, calc(100% - 10px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+/* iOS zooms the page into a focused field whose text is under 16px, and does
+   not zoom back out. */
+@media (max-width: 768px), (pointer: coarse) {
+  input, textarea, select { font-size: 16px !important; }
+}
+
+/* Three weights only (400/500/600): bold text is 600, not the browser's 700. */
+b, strong { font-weight: var(--weight-semibold); }
+
+body {
+  font-family: var(--font-sans);
+  color: var(--ink-0);
+  background: var(--bg-0);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background-color 0.2s ease, color 0.2s ease;
+}
+
+/* A wait line ("Loading…") shows only once the wait is long enough to notice: a fast answer
+   never flashes it. Its box is there from the first frame, so nothing moves when it shows.
+   (Not motion: it only appears later, so reduced motion keeps it.) */
+.late { animation: lateShow 1ms linear 300ms backwards; }
+@keyframes lateShow { from { visibility: hidden; } }
+
+@keyframes msgIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes dotPulse {
+  0%, 80%, 100% { transform: scale(0.6); opacity: 0.4; }
+  40%           { transform: scale(1);   opacity: 1; }
+}
+@keyframes ringPulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--turn) 50%, transparent); }
+  70%  { box-shadow: 0 0 0 7px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes orangePulse {
+  0%   { box-shadow: 0 0 0 0 color-mix(in srgb, var(--warn) 45%, transparent); }
+  70%  { box-shadow: 0 0 0 6px transparent; }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+@keyframes glowBreathe {
+  0%, 100% { border-color: color-mix(in srgb, var(--warn) 42%, transparent); }
+  50%      { border-color: color-mix(in srgb, var(--warn) 82%, transparent); }
+}
+
+/* Code highlight (highlight.js classes) for the thread, docs, diff and file views, in both
+   themes. Muted hues that sit with the neutral greys; the code box takes its surface from the
+   view (no theme background of its own). Replaces highlight.js's github-dark.css, which kept
+   code dark in the light theme. */
+:root {
+  --syn-fg: var(--ink-0);
+  --syn-comment: #7d7d7d;
+  --syn-keyword: #f0857a;
+  --syn-entity: #c4a7f5;
+  --syn-constant: #7cb8f5;
+  --syn-string: #8fc79a;
+  --syn-builtin: #e6a86b;
+  --syn-tag: #79c98a;
+  --syn-add-bg: rgb(63 179 90 / 0.16);
+  --syn-del-bg: rgb(240 82 82 / 0.16);
+}
+:root[data-theme="light"] {
+  --syn-fg: var(--ink-0);
+  --syn-comment: #7a7a7a;
+  --syn-keyword: #cf222e;
+  --syn-entity: #8250df;
+  --syn-constant: #0550ae;
+  --syn-string: #116329;
+  --syn-builtin: #953800;
+  --syn-tag: #116329;
+  --syn-add-bg: #dafbe1;
+  --syn-del-bg: #ffebe9;
+}
+pre code.hljs { display: block; overflow-x: auto; padding: 1em; }
+code.hljs { padding: 3px 5px; }
+.hljs { color: var(--syn-fg); background: transparent; }
+.hljs-doctag, .hljs-keyword, .hljs-meta .hljs-keyword, .hljs-template-tag, .hljs-template-variable,
+.hljs-type, .hljs-variable.language_ { color: var(--syn-keyword); }
+.hljs-title, .hljs-title.class_, .hljs-title.class_.inherited__, .hljs-title.function_ { color: var(--syn-entity); }
+.hljs-attr, .hljs-attribute, .hljs-literal, .hljs-meta, .hljs-number, .hljs-operator, .hljs-variable,
+.hljs-selector-attr, .hljs-selector-class, .hljs-selector-id { color: var(--syn-constant); }
+.hljs-regexp, .hljs-string, .hljs-meta .hljs-string { color: var(--syn-string); }
+.hljs-built_in, .hljs-symbol { color: var(--syn-builtin); }
+.hljs-comment, .hljs-code, .hljs-formula { color: var(--syn-comment); }
+.hljs-name, .hljs-quote, .hljs-selector-tag, .hljs-selector-pseudo { color: var(--syn-tag); }
+.hljs-subst { color: var(--syn-fg); }
+.hljs-section { color: var(--syn-constant); font-weight: var(--weight-semibold); }
+.hljs-bullet { color: var(--syn-builtin); }
+.hljs-emphasis { color: var(--syn-fg); font-style: italic; }
+.hljs-strong { color: var(--syn-fg); font-weight: var(--weight-semibold); }
+.hljs-addition { color: var(--add); background-color: var(--syn-add-bg); }
+.hljs-deletion { color: var(--del); background-color: var(--syn-del-bg); }

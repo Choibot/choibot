@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake `journalctl --user -u <unit>` of the install test: the log file of the fake service.
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+unit=; while [ $# -gt 0 ]; do [ "$1" = -u ] && unit=${2:-}; shift; done
+tail -n 100 "$STATE/${unit%.service}.log" 2>/dev/null || true

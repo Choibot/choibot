@@ -1,0 +1,2 @@
+# git archive writes the commit into this file (server/buildid.mjs reads it at the build).
+server/release-commit.txt export-subst

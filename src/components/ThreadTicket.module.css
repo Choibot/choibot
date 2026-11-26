@@ -1,0 +1,323 @@
+/* src/components/ThreadTicket.module.css — a queue ticket in the agent thread (A · Inset).
+   A hairline card; colour only at dot size. */
+
+/* The dot of a ticket: blue = the agent waits on you, amber = waiting on a PR,
+   green = answered, hollow grey = closed with no answer or snoozed. */
+.dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--idle); }
+.dot[data-tone="turn"] { background: var(--turn); }
+.dot[data-tone="warn"] { background: var(--warn); }
+.dot[data-tone="done"] { background: var(--ok); }
+.dot[data-tone="idle"] { background: transparent; border: 1.5px solid var(--idle); }
+
+/* Open ticket: a card at the place where the agent asked. */
+.card {
+  position: relative;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius);
+  background: var(--bg-1);
+  font-family: var(--font-sans);
+}
+.kd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 6px;
+  font: var(--weight-regular) var(--text-xs)/1.5 var(--font-sans);
+  color: var(--ink-2);
+}
+.kd time { margin-left: auto; font-variant-numeric: tabular-nums; }
+.title {
+  margin: -6px 0 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  line-height: 1.4;
+  color: var(--ink-0);
+  overflow-wrap: anywhere;
+}
+.body {
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  color: var(--ink-1);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.link { color: var(--ink-0); text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; overflow-wrap: anywhere; }
+@media (hover: hover) { .link:hover { text-decoration: underline; } }
+.clamped {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  overflow: hidden;
+}
+.more {
+  margin-top: 3px;
+  padding: 0;
+  background: none;
+  border: none;
+  font: var(--weight-regular) var(--text-xs) var(--font-sans);
+  color: var(--ink-2);
+  cursor: pointer;
+}
+@media (hover: hover) { .more:hover { color: var(--ink-0); } }
+
+/* Preview images: a fixed box each, so a late image never moves the thread. */
+.thumbs { display: flex; flex-wrap: wrap; gap: 6px; }
+.thumb {
+  flex: none;
+  width: 116px;
+  height: 76px;
+  padding: 0;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  overflow: hidden;
+  line-height: 0;
+  cursor: zoom-in;
+}
+@media (hover: hover) { .thumb:hover { border-color: var(--ink-2); } }
+.thumb:focus-visible { outline: 1px solid var(--ink-1); outline-offset: 2px; }
+.thumb img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top center; }
+
+.facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2px 12px;
+  font: var(--weight-regular) var(--text-xs) var(--font-sans);
+  color: var(--ink-2);
+}
+
+/* One button for each option of a choice; its letter as a key cap. */
+.options { display: flex; flex-direction: column; gap: 6px; }
+.option {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  width: 100%;
+  min-width: 0;
+  padding: 6px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  font: var(--weight-regular) var(--text-sm)/1.45 var(--font-sans);
+  color: var(--ink-0);
+  text-align: left;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+@media (hover: hover) { .option:hover:not(:disabled) { background: var(--bg-3); } }
+.option:disabled { cursor: default; color: var(--ink-1); }
+.option:focus-visible, .b:focus-visible, .undo:focus-visible, .lineMain:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.optKey {
+  flex: none;
+  align-self: center;
+  min-width: 18px;
+  padding: 0 4px;
+  border: 1px solid var(--line-2);
+  border-radius: 4px;
+  font: var(--weight-medium) 10.5px/16px var(--font-mono);
+  color: var(--ink-2);
+  text-align: center;
+}
+.optText { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.optDetail { color: var(--ink-1); }
+.star { flex: none; display: grid; color: var(--ink-1); }
+.rec { font-size: var(--text-sm); color: var(--ink-0); overflow-wrap: anywhere; }
+.rec > svg { margin-right: 6px; color: var(--ink-2); }
+/* An open pr ticket: its state in place of an Approve button. */
+.wait { display: flex; flex-wrap: wrap; gap: 2px 8px; font-size: var(--text-sm); color: var(--ink-1); }
+.wait b { color: var(--ink-0); font-weight: var(--weight-medium); }
+.why { color: var(--ink-2); }
+
+.acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.acts:empty { display: none; }
+/* The buttons: 28 px, radius 7; the primary one inverted. */
+.b {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: none;
+  font: var(--weight-medium) var(--text-sm) var(--font-sans);
+  color: var(--ink-0);
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color 120ms ease;
+}
+@media (hover: hover) { .b:hover:not(:disabled) { background: var(--bg-3); } }
+.b:disabled { opacity: 0.45; cursor: default; }
+.pri { background: var(--inv); border-color: transparent; color: var(--inv-ink); }
+.pri:disabled { background: var(--bg-2); color: var(--ink-2); opacity: 1; }
+@media (hover: hover) { .pri:hover:not(:disabled) { background: var(--inv-hover); } }
+.ro { font-size: var(--text-xs); color: var(--ink-2); }
+
+.replyRow { display: flex; flex-direction: column; gap: 6px; }
+/* The image button (AnswerImages.tsx) beside the box. */
+.replyField { display: flex; align-items: flex-end; gap: 4px; min-width: 0; }
+.replyField > .reply { flex: 1; min-width: 0; }
+.reply {
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 54px;
+  resize: vertical;
+  padding: 7px 10px;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  background: var(--bg-1);
+  font: var(--weight-regular) var(--text-sm)/1.45 var(--font-sans);
+  color: var(--ink-0);
+}
+.reply:focus { outline: none; border-color: var(--ink-2); }
+.reply::placeholder { color: var(--ink-2); }
+.replyActs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.hint { font: var(--weight-regular) var(--text-xs) var(--font-sans); color: var(--ink-2); margin-left: 2px; }
+/* Over the card's first line: the note must not change the card's height (a new height
+   starts the shift guard again). */
+.note {
+  position: absolute;
+  top: 5px;
+  right: 7px;
+  padding: 3px 9px;
+  border: 1px solid var(--warn);
+  border-radius: var(--radius-sm);
+  background: var(--bg-2);
+  font-size: var(--text-xs);
+  color: var(--ink-0);
+}
+.error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: var(--text-xs);
+  color: var(--err);
+  overflow-wrap: anywhere;
+}
+
+/* Closed (or snoozed) ticket: a small hairline card, "Choice · answered", the
+   question and the answer. A click shows the question's text again. */
+.lineWrap {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 11px 14px;
+  border: 1px solid var(--line-2);
+  border-radius: 10px;
+  font: var(--weight-regular) var(--text-sm)/1.45 var(--font-sans);
+  color: var(--ink-1);
+}
+.lineTop { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: var(--text-xs); color: var(--ink-2); }
+.lkind { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ltime { flex: none; margin-left: auto; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.lineMain {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.ltitle {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-semibold);
+  color: var(--ink-0);
+}
+.lans { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-1); }
+.lineWrap[data-open] .ltitle, .lineWrap[data-open] .lans { white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (hover: hover) { .lineMain:hover .ltitle { text-decoration: underline; text-decoration-color: var(--line-2); text-underline-offset: 2px; } }
+.undo {
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid var(--line-2);
+  border-radius: 6px;
+  background: none;
+  font: var(--weight-medium) var(--text-xs) var(--font-sans);
+  color: var(--ink-1);
+  cursor: pointer;
+}
+@media (hover: hover) { .undo:hover { color: var(--ink-0); background: var(--bg-3); } }
+.stuck { color: var(--warn); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.lineBody {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+/* Open tickets above the visible part of the thread: one pill, a press goes to the nearest. */
+.above {
+  position: absolute;
+  left: 50%;
+  top: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 12px;
+  font: var(--weight-medium) var(--text-xs) var(--font-sans);
+  color: var(--ink-0);
+  background: var(--bg-1);
+  border: 1px solid var(--line-2);
+  border-radius: 999px;
+  white-space: nowrap;
+  cursor: pointer;
+  box-shadow: var(--shadow-pop);
+}
+@media (hover: hover) { .above:hover { background: var(--bg-3); } }
+.aboveDot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--turn); }
+
+/* Phone: controls are finger size; the reply does not zoom the page. */
+@media (max-width: 768px) {
+  .card { padding: 11px 12px 12px; gap: 9px; }
+  .title { font-size: var(--text-base); }
+  .body { font-size: var(--text-sm); }
+  .b { height: 36px; padding: 0 14px; font-size: var(--text-sm); touch-action: manipulation; }
+  .option { padding: 10px 12px; font-size: var(--text-base); touch-action: manipulation; }
+  .thumb { width: 104px; height: 72px; }
+  .reply { font-size: var(--text-lg); }
+  .hint { display: none; }
+  .more { padding: 6px 0; }
+  .lineWrap { padding: 10px 12px; }
+  .undo { height: 30px; padding: 0 10px; }
+  .above { padding: 8px 14px; font-size: var(--text-xs); touch-action: manipulation; }
+}
+@media (hover: none) {
+  .b:hover:not(:disabled) { background: none; }
+  .pri:hover:not(:disabled) { background: var(--inv); }
+  .option:hover:not(:disabled) { background: var(--bg-1); }
+}
+@media (prefers-reduced-motion: reduce) { .b, .option { transition: none; } }
+
+/* The body as markdown (QueueView's Md) at the card's size: the card's 13 px type, ink and
+   line height, short gaps between blocks. Folded, it shows about five lines and fades out. */
+.body > div { font-size: inherit; line-height: inherit; color: inherit; white-space: normal; }
+.body > div :is(p, ul, ol, pre, blockquote, [data-table]) { margin-bottom: 6px; }
+.body.clamped {
+  display: block;
+  -webkit-line-clamp: unset;
+  line-clamp: none;
+  max-height: calc(1.55em * 5);
+  -webkit-mask-image: linear-gradient(#000 70%, transparent);
+  mask-image: linear-gradient(#000 70%, transparent);
+}

@@ -1,0 +1,49 @@
+#!/usr/bin/env bash
+# The fake agent of the path test: what a Claude Code session does for the first task, with no
+# model. The fake `claude` of the install test starts it next to the session (the test copies
+# this file to <root>/state/agent) and gives it the argv of the session. It does real work with
+# the agent's own environment: a real commit in the agent's copy of the repo, a real push (to
+# <root>/github.com), a pull request (the fake gh), and the ticket, added with the very command
+# that the console's instructions give the agent.
+#   <root>/state/agent-mode   pr (default) | stop (it stops and opens no pull request)
+set -u
+ROOT=$(cd "$(dirname "$(readlink -f "$0")")/.." && pwd -P)
+STATE=$ROOT/state
+case $ROOT in /tmp/choibot-it-*) ;; *) echo "fake agent: not inside a test root" >&2; exit 97 ;; esac
+case $PWD in "$ROOT"/home/*) ;; *) echo "fake agent: $PWD is not in the test's home" >&2; exit 97 ;; esac
+who=${CHOIBOT_AGENT_ID:-?}
+say() { printf '[%s] %s\n' "$who" "$*"; }
+
+settings= instructions= prev=
+for a in "$@"; do
+  [ "$prev" = --settings ] && settings=$a
+  [ "$prev" = --append-system-prompt ] && instructions=$a
+  prev=$a
+done
+url=$(grep -oE 'http://127\.0\.0\.1:[0-9]+/api/agents/[^/"\\]+/hook\?token=[^"\\[:space:]]+' "$settings" 2>/dev/null | head -n 1)
+hook() { [ -z "$url" ] || curl -s -m 10 -o /dev/null -X POST "$url" -H 'content-type: application/json' --data-binary "{\"hook_event_name\":\"$1\",\"session_id\":\"fake-${FAKE_SESSION_PID:-0}\"}"; }
+# The agent stops: the session waits for the user.
+stop() { say "$*"; hook Stop; exit 0; }
+
+mode=$(cat "$STATE/agent-mode" 2>/dev/null || echo pr)
+say "started in $PWD (mode $mode)"
+sleep 2
+hook UserPromptSubmit
+sleep 2
+[ "$mode" = pr ] || stop "stopped with no pull request"
+
+branch=$(git rev-parse --abbrev-ref HEAD)
+printf '\n## Run it locally\n\nInstall Node, then run `npm start`.\n' >>README.md
+git add README.md || stop "git add failed"
+git commit -q -m 'docs: add a "Run it locally" section to the README' || stop "the commit failed"
+git push -q -u origin "$branch" || stop "the push failed"
+pr=$(gh pr create --base main --head "$branch" --title 'Add a "Run it locally" section to the README' \
+  --body 'This adds a short "Run it locally" section. The start command comes from package.json.') || stop "the pull request was not opened"
+say "pull request $pr"
+# The command of the console's own instructions: "run `<command> queue add` (JSON on stdin)".
+add=$(printf '%s' "$instructions" | grep -oE 'run `[^`]+ queue add`' | head -n 1 | sed 's/^run `//; s/`$//')
+[ -n "$add" ] || stop "the instructions name no command for the ticket"
+ticket=$(printf '{"kind":"pr","title":"Add a \\"Run it locally\\" section to the README","body":"The README has a new section **Run it locally**. The start command comes from `package.json`. No app code changed.","pr":{"url":"%s"}}' "$pr")
+# shellcheck disable=SC2086
+printf '%s' "$ticket" | $add || stop "the ticket was not added"
+stop "done"

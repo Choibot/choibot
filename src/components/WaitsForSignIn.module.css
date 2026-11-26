@@ -1,0 +1,65 @@
+/* A persistent agent that waits for the second sign-in: a quiet card, never an alarm. */
+.wait {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 520px;
+  margin: 48px auto;
+  padding: 18px 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-md, 10px);
+  background: var(--bg-1);
+}
+.line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+  font-weight: 600;
+  color: var(--ink-0);
+}
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--ink-2);
+}
+.help {
+  margin: 0;
+  color: var(--ink-1);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.box {
+  min-height: 72px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-0);
+  color: var(--ink-0);
+  font: inherit;
+  font-size: var(--text-sm);
+  resize: vertical;
+}
+.acts {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+.btn {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px);
+  background: var(--bg-2);
+  color: var(--ink-0);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+}
+.btn:disabled { opacity: 0.6; cursor: default; }
+.said { margin: 0; color: var(--ink-1); font-size: var(--text-sm); }

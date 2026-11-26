@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Fake `uname` of the install test: <root>/state/os gives another answer for `uname -s`.
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+if [ "$*" = -s ] && [ -f "$STATE/os" ]; then cat "$STATE/os"; exit 0; fi
+exec /usr/bin/uname "$@"

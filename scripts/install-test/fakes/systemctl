@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# Fake `systemctl --user` of the install test: a very small service manager for ONE test root.
+# It starts the unit's ExecStart as a plain process group with the unit's own env, and keeps
+# its pid in <root>/state. It never talks to a real service manager.
+#   <root>/state/service-env   more env lines (KEY=value) for the unit, for a test that needs a
+#                              test knob of the console (the path test: its fake Telegram).
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+[ "${1:-}" = --user ] || { echo "fake systemctl: only --user" >&2; exit 1; }
+shift
+if [ "$(mode bus ok)" != ok ]; then echo "Failed to connect to bus: No medium found" >&2; exit 1; fi
+cmd=${1:-}; shift || true
+units=()
+for a in "$@"; do case $a in -*) ;; *) units+=("$a") ;; esac; done
+unit_file() { printf '%s' "$HOME/.config/systemd/user/$1"; }
+pid_file() { printf '%s' "$STATE/${1%.service}.pid"; }
+active() { local p; p=$(cat "$(pid_file "$1")" 2>/dev/null) && [ -n "$p" ] && kill -0 "$p" 2>/dev/null; }
+stop() {
+  local p; p=$(cat "$(pid_file "$1")" 2>/dev/null) || return 0
+  kill -TERM -- "-$p" 2>/dev/null || true
+  for _ in $(seq 50); do kill -0 "$p" 2>/dev/null || break; sleep 0.2; done
+  kill -KILL -- "-$p" 2>/dev/null || true
+  rm -f "$(pid_file "$1")"
+}
+start() {
+  local f wd envfile line exec_line path
+  f=$(unit_file "$1")
+  [ -f "$f" ] || { echo "Unit $1 could not be found." >&2; return 5; }
+  # <root>/state/service: ok | fail | stuck (it fails until `reset-failed <unit>` ran, as a
+  # unit that hit its start limit does).
+  [ "$(mode service ok)" = ok ] || { echo "Job for $1 failed because the control process exited with error code." >&2; return 1; }
+  wd=$(sed -n 's/^WorkingDirectory=//p' "$f")
+  envfile=$(sed -n 's/^EnvironmentFile=//p' "$f")
+  exec_line=$(sed -n 's/^ExecStart=//p' "$f")
+  local envs=()
+  while IFS= read -r line; do envs+=("${line#Environment=}"); done < <(grep '^Environment=' "$f" | grep -v '^Environment=PATH=')
+  if [ -n "$envfile" ] && [ -f "$envfile" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do case $line in '' | \#*) ;; *=*) envs+=("$line") ;; esac; done <"$envfile"
+  fi
+  if [ -f "$STATE/service-env" ]; then
+    while IFS= read -r line || [ -n "$line" ]; do case $line in '' | \#*) ;; *=*) envs+=("$line") ;; esac; done <"$STATE/service-env"
+  fi
+  # The unit's PATH without the dirs of the real system: the fakes and the test's own tools instead.
+  path=$(sed -n 's/^Environment=PATH=//p' "$f" | tr ':' '\n' | grep -vx -e /usr/local/bin -e /usr/bin -e /bin | paste -sd: -)
+  # One simple command in the background: its pid is the leader of the new session, and no
+  # pipe of the caller stays open in it.
+  cd "$wd" || return 1
+  # shellcheck disable=SC2086
+  setsid env -i HOME="$HOME" USER="${USER:-}" LANG=C.UTF-8 TMPDIR="$ROOT/tmp" "${envs[@]}" \
+    PATH="$ROOT/fakebin:$path:$ROOT/sysbin" $exec_line >>"$STATE/${1%.service}.log" 2>&1 </dev/null &
+  echo $! >"$(pid_file "$1")"
+}
+case $cmd in
+  is-system-running) echo running ;;
+  reset-failed) [ "$(mode service ok)" != stuck ] || rm -f "$STATE/service" ;;
+  daemon-reload | enable | disable | list-unit-files | list-timers) [ "$cmd" != enable ] || [[ " $* " != *" --now "* ]] || for u in "${units[@]}"; do active "$u" || start "$u" || exit $?; done ;;
+  start) for u in "${units[@]}"; do active "$u" || start "$u" || exit $?; done ;;
+  stop) for u in "${units[@]}"; do stop "$u"; done ;;
+  restart) for u in "${units[@]}"; do stop "$u"; start "$u" || exit $?; done ;;
+  try-restart) for u in "${units[@]}"; do if active "$u"; then stop "$u"; start "$u" || exit $?; fi; done ;;
+  is-active) for u in "${units[@]}"; do active "$u" || exit 3; done ;;
+  cat) for u in "${units[@]}"; do [ -f "$(unit_file "$u")" ] || [ -f "$(unit_file "$u.service")" ] || exit 1; done ;;
+  # `show <unit> -p MainPID --value`: the pid of the unit's first process, 0 when it does not run.
+  show) for u in "${units[@]}"; do case $u in *.service) if active "$u"; then cat "$(pid_file "$u")"; else echo 0; fi ;; esac; done ;;
+  status) for u in "${units[@]}"; do if active "$u" || active "$u.service"; then echo "$u: active (running)"; else echo "$u: inactive"; fi; done ;;
+  *) ;;
+esac

@@ -1,0 +1,33 @@
+# /etc/choibot-agent-exec.conf — config of /usr/local/bin/choibot-agent-exec
+# (deploy/choibot-agent-exec). Install as root, mode 0644 (checklist C4).
+#
+# Plain KEY=VALUE lines. The helper never sources or evaluates this file: no
+# quotes, no $VARS, no comments after a value. Unknown keys are ignored. A
+# missing required key makes every verb (and `probe`) exit 2, so the console
+# stays in weak mode. Each path must equal the console's own value in its
+# .env: the probe does not compare them (checklist C4).
+
+# Required. The console's AGENT_DTACH_DIR (group choibot, mode 3770, checklist C3).
+# On an install with the old names the default is /tmp/choibot-dtach.
+DTACH_DIR=/tmp/choibot-dtach
+
+# Required. A dtach binary the agent user can run: not one under the console
+# user's home (a home dir is often 0750).
+DTACH_BIN=/usr/local/bin/dtach
+
+# Required. The allowed agent cwds: the agent worktree root (the console's
+# AGENT_WORKTREE_ROOT when absolute; with the relative default every worktree
+# is under WORKSPACE_DIR), the workspace, and AGENT_HOME_ROOT (checklist C3).
+WORKTREE_ROOT=/home/you/workspace/choibot/.agent-worktrees
+WORKSPACE_DIR=/home/you/workspace
+AGENT_HOME_ROOT=/srv/choibot-agent-homes
+
+# Optional. Seconds before `run` kills a widget script (default 30).
+#RUN_TIMEOUT=30
+
+# Optional. Seconds that one `read-tasks` (the Plan rail) may take, 1 to 60 (default 10).
+#READ_TASKS_LIMIT=10
+
+# Optional. PATH of every agent session and widget script
+# (default /usr/local/bin:/usr/bin:/bin).
+#AGENT_PATH=/usr/local/bin:/usr/bin:/bin

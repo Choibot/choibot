@@ -1,0 +1,245 @@
+.app {
+  display: grid;
+  grid-template-columns: 1fr;
+  /* Shrinks with the mobile soft keyboard via --app-vh (useVisualViewportHeight);
+     falls back to 100dvh on desktop. */
+  height: var(--app-vh, 100dvh);
+  background: var(--bg-0);
+  color: var(--ink-0);
+  /* The shell is a fixed-height frame; inner regions own their scroll. Clipping
+     here stops a too-wide child (e.g. the terminal) from making the whole page
+     pan left-right on mobile. */
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* ── Desktop shell (A · Inset) ──
+   One sidebar on the canvas, the work area as one rounded panel beside it. */
+.shell { grid-template-columns: 248px minmax(0, 1fr); }
+/* The server draws the desktop shell (it cannot know the width). On a phone that shell painted
+   for the moment before the app started, then the phone shell replaced it: hide it there. */
+@media (max-width: 768px) { .shell > * { visibility: hidden; } }
+.side {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  padding: 10px 8px;
+  overflow: hidden;
+}
+.brand {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  height: 36px;
+  padding: 0 0 0 8px;
+}
+.brandName { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.newBtn {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: transparent;
+  border: 1px solid var(--line-2);
+  border-radius: var(--radius-sm);
+  color: var(--ink-1);
+  cursor: pointer;
+  transition: background-color 0.12s, color 0.12s;
+}
+@media (hover: hover) { .newBtn:hover { background: var(--bg-3); color: var(--ink-0); } }
+.newBtn:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
+/* The rows scroll; the brand and the footer stay. */
+.sideScroll {
+  flex: 1;
+  min-height: 0;
+  margin-top: 6px;
+  overflow-x: hidden;
+  overflow-y: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-2) transparent;
+}
+.foot {
+  flex: none;
+  display: grid;
+  gap: 8px;
+  padding: 10px 8px 2px;
+  border-top: 1px solid var(--line);
+}
+.acct { display: flex; align-items: center; gap: 9px; min-width: 0; }
+/* The work area. Inside it the darkest level is the panel itself: a view that
+   paints var(--bg-0) sits on the panel colour, not on the canvas. */
+.panel {
+  --bg-0: var(--bg-1);
+  /* The terminal sits on the panel too (XtermTerminal termTheme matches it). */
+  --term-bg: var(--bg-1);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  min-width: 0;
+  min-height: 0;
+  margin: 8px 8px 8px 0;
+  background: var(--bg-1);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.editorHost { width: 100%; height: 100%; min-height: 0; display: flex; flex-direction: column; }
+.editorModeBody { flex: 1; min-height: 0; }
+
+/* ── Agents view (desktop: inside the panel; the Changes rail on the right) ── */
+.agents { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; height: 100%; }
+.agentsActive { grid-template-columns: minmax(0, 1fr) 300px; }
+.agentCenter { min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+
+/* Agent pane: the widget strip on top (flex:none, max 45%), the terminal
+   fills the rest. XtermTerminal's ResizeObserver refits and resizes the PTY
+   when the strip opens or collapses. position:relative anchors the
+   "Open large" widget overlay. */
+.termStack { position: relative; display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.termFill { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.termFill > * { flex: 1; min-height: 0; }
+
+.placeholder {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-2);
+  font-size: var(--text-base);
+}
+
+/* ── Phone (≤768px, A · Inset): one screen at a time on the canvas ── */
+/* Light: the phone screens take the white panel colour (as the desktop panel does), so the grey
+   bubbles, chips and pills (--bg-2) stay visible on them. */
+:root[data-theme="light"] .phone { --bg-0: var(--bg-1); }
+.phone {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: var(--bg-0);
+  overflow: hidden;
+}
+.screen { flex: 1; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
+.screen > .termStack { flex: 1; height: auto; }
+.screenBody { flex: 1; min-height: 0; min-width: 0; position: relative; overflow: hidden; display: flex; flex-direction: column; }
+.screenBody > * { flex: 1; min-height: 0; }
+.screenBody > .termStack { height: auto; }
+
+/* The home list: the large title and "+", the rows, then account, theme and usage. */
+.homeHead {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: calc(4px + env(safe-area-inset-top, 0px)) 16px 8px;
+}
+.homeTitle {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font: var(--weight-bold) var(--text-title)/1.15 var(--font-sans);
+  letter-spacing: -0.025em;
+  color: var(--ink-0);
+}
+.round {
+  position: relative;
+  flex: none;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: var(--bg-2);
+  border: none;
+  border-radius: 50%;
+  color: var(--ink-0);
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.round::after { content: ""; position: absolute; inset: -5px; }
+.round:active { background: var(--bg-3); }
+.round:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 2px; }
+.homeScroll {
+  flex: 1;
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+.homeFoot {
+  display: grid;
+  gap: 10px;
+  margin: 8px 16px 12px;
+  padding-top: 12px;
+  border-top: 1px solid var(--line);
+}
+
+/* The Changes sheet: the rail from the bottom, over a dimmed screen. */
+.sheetBackdrop { position: fixed; inset: 0; z-index: 80; background: var(--scrim); animation: fadeIn 0.18s ease both; }
+.sheet {
+  position: fixed;
+  z-index: 90;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: min(78%, 640px);
+  display: flex;
+  flex-direction: column;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  background: var(--bg-1);
+  border-radius: 14px 14px 0 0;
+  box-shadow: var(--shadow), var(--shadow-pop);
+  overflow: hidden;
+  animation: sheetIn 0.22s cubic-bezier(0.32, 0.72, 0, 1) both;
+}
+.grabber {
+  flex: none;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  background: none;
+  border: none;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.grabber span { width: 36px; height: 5px; border-radius: 3px; background: var(--line-2); }
+.sheetBody { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* The rail itself: no left hairline in the sheet, the sheet's height. */
+.sheetBody > * { flex: 1; min-height: 0; height: auto; border-left: 0; }
+
+@media (max-width: 768px) {
+  /* Phone: the shell is pinned to the visible area (useVisualViewportHeight). Its
+     height is the space above the soft keyboard, and it moves down with the
+     visible area when iOS pans the page to the focused field. The transform also
+     makes it the frame of its fixed overlays (the Changes sheet), so they stay
+     above the keyboard too. */
+  .app {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    transform: translateY(var(--app-vv-top, 0px));
+  }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .sheet, .sheetBackdrop { animation: none; }
+}
+
+@keyframes sheetIn {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}

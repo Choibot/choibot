@@ -1,0 +1,37 @@
+#!/usr/bin/env bash
+# Fake `curl` of the install test. It answers the addresses of the install script itself:
+#   - a host named in <root>/state/net-down cannot be reached;
+#   - github.com and api.anthropic.com "answer" with no network call;
+#   - the installer of Claude Code is a small script that installs the test's fake `claude`;
+#   - the archives of Node and of gh come from the test's cache (one real download each, then
+#     no more), or are a wrong file with <root>/state/node-bad.
+# Every other address goes to the real curl.
+. "$(dirname "$(readlink -f "$0")")/_lib.sh"
+url= out=
+args=("$@")
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case ${args[i]} in
+    -o) out=${args[i + 1]} ;;
+    http://* | https://*) url=${args[i]} ;;
+  esac
+done
+put() { if [ -n "$out" ] && [ "$out" != /dev/null ]; then cat >"$out"; else cat >/dev/null; fi; }
+if [ -f "$STATE/net-down" ]; then
+  while IFS= read -r host; do
+    case $url in *"$host"*) echo "curl: (6) Could not resolve host: $host" >&2; exit 6 ;; esac
+  done <"$STATE/net-down"
+fi
+case $url in
+  https://github.com | https://api.anthropic.com) : | put ;;
+  https://claude.ai/install.sh)
+    [ "$(mode claude-install ok)" = ok ] || { echo "curl: (22) The requested URL returned error: 503" >&2; exit 22; }
+    printf '#!/bin/bash\n# The fake installer of Claude Code (install test).\nmkdir -p "$HOME/.local/bin" && ln -sf %q "$HOME/.local/bin/claude"\necho "Claude Code successfully installed (fake)"\n' "$ROOT/fakes/claude" | { if [ -n "$out" ]; then cat >"$out"; else cat; fi; } ;;
+  https://nodejs.org/dist/*.tar.gz | https://github.com/cli/cli/releases/download/*.tar.gz)
+    cache=$(cat "$STATE/cache-dir")/$(basename "$url")
+    if [ -f "$STATE/node-bad" ]; then echo "this is not the Node archive" | put
+    else
+      [ -f "$cache" ] || /usr/bin/curl -fsSL --retry 2 -o "$cache.part" "$url" && { [ -f "$cache" ] || mv "$cache.part" "$cache"; }
+      put <"$cache"
+    fi ;;
+  *) exec /usr/bin/curl "$@" ;;
+esac

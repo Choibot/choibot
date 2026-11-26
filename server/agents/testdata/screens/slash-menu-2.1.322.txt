@@ -1,0 +1,30 @@
+
+ ▐▛███▛█   Claude Code v2.1.322
+▝▜██████▀  Haiku 5.5 · Claude Max
+ ▝▝   ▝▝   ~/workspace/choibot/.agent-worktrees/agent-01b20a50/.e2e-tmp/idle
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  ❯ /model                                          Set the AI model for Claude Code (currently Haiku 5.5)
+    …ng-revenue-metrics (modeling-revenue-metrics)  (posthog) Build reusable revenue models — MRR, ARR, gross revenue,
+                                                    new/expansion/contraction/churn, ARPU, LTV, and per-customer/per-…
+    …-dimension-tables (modeling-dimension-tables)  (posthog) Build reusable dimension / lookup tables for a star
+                                                    schema — country/region, timezone, currency, date, plan/product, …
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ /model
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏸ manual mode on

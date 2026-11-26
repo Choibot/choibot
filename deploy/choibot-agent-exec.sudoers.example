@@ -1,0 +1,14 @@
+# /etc/sudoers.d/choibot-agent-exec — lets the console run deploy/choibot-agent-exec
+# as the agent user (spec Appendix B step 3, checklist C4). The user installs it
+# as root, through visudo only:
+#
+#   visudo -f /etc/sudoers.d/choibot-agent-exec
+#
+# Replace <console-user> with the console's user name (today: claude).
+# The env_keep list holds SUDO_ENV_KEEP of the console under both key spellings (CHOIBOT_* for
+# a new install, CHOIBOT_* for an install with the old names). It never holds a
+# console secret (TELEGRAM_BOT_TOKEN, CONSOLE_COOKIE_SECRET) nor
+# CHOIBOT_AGENT_EXEC_CONF (sudo's env_reset strips that one, so the helper always
+# reads /etc/choibot-agent-exec.conf). The helper sets PATH and HOME itself.
+<console-user> ALL=(choibot-agent) NOPASSWD: /usr/local/bin/choibot-agent-exec
+Defaults!/usr/local/bin/choibot-agent-exec env_keep += "CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS PORT CLAUDE_CONFIG_DIR CODEX_HOME TERM LANG CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL CRON_DATA_DIR TZ"

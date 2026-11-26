@@ -1,0 +1,11 @@
+/* The rich part of a ticket (QueueRich.tsx): a quiet frame with the console's own head. */
+.rich { display: flex; flex-direction: column; min-width: 0; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--bg-1); overflow: hidden; }
+.head { flex: none; display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 4px 0 12px; border-bottom: 1px solid var(--line); background: var(--bg-2); color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
+.from { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.sep { margin: 0 2px; }
+.expand { flex: none; height: 22px; padding: 0 8px; border: none; border-radius: 5px; background: none; color: var(--ink-1); font: inherit; cursor: pointer; touch-action: manipulation; transition: background-color 0.12s ease; }
+@media (hover: hover) { .expand:hover { background: var(--bg-3); color: var(--ink-0); } }
+.expand:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.frame { display: block; width: 100%; border: none; background: var(--bg-1); }
+.failed { margin: 0; color: var(--ink-2); font-size: var(--text-sm); }
+@media (prefers-reduced-motion: reduce) { .expand { transition: none; } }

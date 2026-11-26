@@ -1,0 +1,197 @@
+.root {
+  overflow: auto;
+  padding: 12px 16px 20px;
+  background: var(--bg-0);
+}
+.none,
+.empty {
+  padding: 16px;
+  color: var(--ink-2);
+  font-size: var(--text-sm);
+  font-family: var(--font-sans);
+}
+.summary {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  color: var(--ink-2);
+  margin-bottom: 10px;
+}
+
+.file {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  margin-bottom: 12px;
+  background: var(--bg-1);
+}
+
+.fileHead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: var(--bg-2);
+  border-bottom: 1px solid var(--line);
+}
+.fileTitle {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  color: var(--ink-0);
+  font: inherit;
+  min-width: 0;
+  flex: 1;
+  text-align: left;
+}
+.caret {
+  display: inline-grid;
+  transition: transform 0.12s ease;
+  color: var(--ink-2);
+}
+.caret[data-open="true"] { transform: rotate(90deg); }
+
+.path {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  color: var(--ink-0);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.renameOld { color: var(--ink-2); }
+
+/* The change type as a quiet chip: the +/− counts beside it carry the colour. */
+.badge {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  line-height: 18px;
+  padding: 0 6px;
+  border-radius: 5px;
+  color: var(--ink-1);
+  background: var(--bg-3);
+  white-space: nowrap;
+}
+
+.headRight {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+.counts {
+  display: inline-flex;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+}
+.counts .add { color: var(--add); }
+.counts .del { color: var(--del); }
+
+.toggle {
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--ink-1);
+  cursor: pointer;
+  transition: border-color 0.12s, color 0.12s;
+}
+@media (hover: hover) { .toggle:hover { border-color: var(--ink-2); color: var(--ink-0); } }
+.toggle[data-active="true"] { border-color: var(--ink-2); color: var(--ink-0); }
+/* "Full file" of a PR's change view: the whole file with the change in it (PrDiffPanel). */
+.fullBtn { display: inline-flex; align-items: center; gap: 5px; }
+
+/* ---- code body ---- */
+.code {
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  overflow-x: auto;
+}
+.hunkHead {
+  padding: 3px 12px;
+  color: var(--ink-2);
+  background: var(--bg-2);
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  white-space: pre;
+}
+
+/* unified rows */
+.row {
+  display: grid;
+  grid-template-columns: 44px 44px 18px 1fr;
+  align-items: baseline;
+}
+.lno {
+  text-align: right;
+  padding: 0 8px;
+  color: var(--ink-2);
+  user-select: none;
+  white-space: nowrap;
+}
+.mark {
+  text-align: center;
+  color: var(--ink-2);
+  user-select: none;
+}
+.text {
+  white-space: pre;
+  padding-right: 12px;
+  color: var(--ink-0);
+}
+
+.row_context {}
+/* Green/red row background; the code text stays --ink-0, so it always contrasts
+   the tint. The coloured gutter sign + left border add a non-chromatic cue for
+   colourblind readers. The tints are the --syn-add-bg / --syn-del-bg tokens
+   (globals.css): quiet in both themes. */
+.row_add {
+  background: var(--syn-add-bg);
+  box-shadow: inset 2px 0 0 var(--add);
+}
+.row_add .mark { color: var(--add); font-weight: var(--weight-semibold); }
+.row_del {
+  background: var(--syn-del-bg);
+  box-shadow: inset 2px 0 0 var(--del);
+}
+.row_del .mark { color: var(--del); font-weight: var(--weight-semibold); }
+
+/* split rows */
+.splitRow {
+  display: grid;
+  grid-template-columns: 44px 1fr 44px 1fr;
+  align-items: baseline;
+}
+.splitLno {
+  border-right: 1px solid var(--line);
+}
+.cell {
+  white-space: pre;
+  padding: 0 12px;
+  color: var(--ink-0);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.cellEmpty {
+  background: color-mix(in srgb, var(--ink-2) 6%, transparent);
+}
+
+@media (max-width: 768px) {
+  .toggle:not(.fullBtn) { display: none; }
+  /* A narrow head cuts the path at its start, so the file name stays. */
+  .path { direction: rtl; text-align: left; }
+  /* Phone: two narrow number columns, so the code gets most of the 390 px. */
+  .row { grid-template-columns: 30px 30px 14px 1fr; }
+  .lno { padding: 0 4px; }
+}

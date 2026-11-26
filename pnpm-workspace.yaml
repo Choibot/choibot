@@ -1,0 +1,10 @@
+allowBuilds:
+  bufferutil: false
+  esbuild: true
+  node-pty: true
+  sharp: true
+  utf-8-validate: false
+onlyBuiltDependencies:
+  - esbuild
+  - node-pty
+  - sharp

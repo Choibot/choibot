@@ -1,0 +1,17 @@
+# deploy/choibot-first-boot.service — the first boot of a server made from a prepared image.
+# Installed by the image recipe as /etc/systemd/system/choibot-first-boot.service. It runs
+# after cloud-init wrote the first-start data and before any user session (so the console's
+# user manager starts with the new settings). See deploy/choibot-first-boot.
+[Unit]
+Description=ChoiBot: the first start of this server (its secret, address and claim link)
+After=cloud-init.service cloud-init-network.service cloud-config.service
+Before=systemd-user-sessions.service
+ConditionPathExists=/etc/choibot/first-start.json
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/choibot-first-boot
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

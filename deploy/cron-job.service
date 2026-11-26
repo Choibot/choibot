@@ -1,0 +1,18 @@
+# ChoiBot cron job runner — systemd USER unit template, one instance per job,
+# rendered by `pnpm choibot cron` into ~/.config/systemd/user/choibot-cron-NAME.service.
+
+[Unit]
+Description=ChoiBot cron job {{JOB_NAME}}
+
+[Service]
+Type=oneshot
+WorkingDirectory={{REPO_DIR}}
+EnvironmentFile={{REPO_DIR}}/.env
+Environment=PATH={{PATH}}
+Environment=CRON_DATA_DIR={{CRON_DATA_DIR}}
+ExecStart={{NODE_BIN}} {{REPO_DIR}}/bin/cron-runner.mjs {{JOB_NAME}}
+# Backstop for a wedged runner; the runner's own timeout fires first.
+# TimeoutStartSec, not RuntimeMaxSec: systemd ignores RuntimeMaxSec= on
+# Type=oneshot units ("has no effect", verified on systemd 255) — for oneshot,
+# TimeoutStartSec= is what bounds ExecStart (it defaults to infinity there).
+TimeoutStartSec={{TIMEOUT_START_SEC}}

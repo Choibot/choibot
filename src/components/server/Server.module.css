@@ -1,0 +1,190 @@
+/* src/components/server/Server.module.css — the Server page (A · Inset): a 52 px head and one
+   column of blocks (the blocks, rows and buttons are those of Settings). Tokens only; colour only
+   on a dot and on a bar that is over its limit. */
+.page {
+  display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-1); color: var(--ink-0);
+  font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.45; font-variant-numeric: tabular-nums;
+}
+.head { flex: none; display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 20px; border-bottom: 1px solid var(--line); }
+.title { flex: none; margin: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.headLine { min-width: 0; margin-left: -2px; color: var(--ink-2); font-size: var(--text-sm); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.scroll { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 28px 56px; }
+.inner { max-width: 860px; margin: 0 auto; }
+.lone { margin: 40px 0; color: var(--ink-1); text-align: center; }
+
+/* What needs the user: before everything else. */
+.warns { display: grid; gap: 8px; margin: 0 0 20px; }
+.warn { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border: 1px solid var(--line-2); border-radius: var(--radius); }
+.warn > i { margin-top: 6px; }
+.warnTitle { font-weight: var(--weight-semibold); }
+.warnText { color: var(--ink-1); }
+.warnTodo { color: var(--ink-1); }
+
+/* The state now: one tile per thing. */
+.tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin: 0 0 24px; }
+.tile { display: grid; align-content: start; gap: 6px; min-width: 0; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius); }
+.tileLabel { color: var(--ink-1); font-size: var(--text-xs); }
+.tileValue { font-size: var(--text-xl); font-weight: var(--weight-semibold); line-height: 1.2; letter-spacing: -0.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tileValue small { color: var(--ink-2); font-size: var(--text-xs); font-weight: var(--weight-regular); letter-spacing: 0; }
+.tileSub { color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.bar { display: block; height: 4px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.bar i { display: block; height: 100%; border-radius: 2px; background: var(--ink-1); transition: width 0.3s; }
+.bar i[data-tone="warn"] { background: var(--warn); }
+.bar i[data-tone="err"] { background: var(--err); }
+
+/* The time switch (the look of the Set-up page's switch). */
+.switch { flex: none; display: inline-flex; padding: 2px; border-radius: var(--radius-sm); background: var(--bg-2); line-height: 1; }
+.switch button {
+  height: 24px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--ink-1);
+  font: var(--weight-medium) var(--text-xs) var(--font-sans); cursor: pointer; white-space: nowrap;
+}
+.switch button[aria-pressed="true"] { background: var(--bg-1); color: var(--ink-0); box-shadow: 0 0 0 1px var(--line); }
+.switch button:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
+
+/* The charts: one series each, the title names it. */
+.charts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.chart { min-width: 0; margin: 0; padding: 12px 14px 10px; border: 1px solid var(--line); border-radius: var(--radius); }
+.chartHead { display: flex; align-items: baseline; gap: 8px; margin-bottom: 8px; }
+.chartTitle { flex: 1; color: var(--ink-1); font-size: var(--text-xs); }
+.chartNow { color: var(--ink-0); font-size: var(--text-xs); font-weight: var(--weight-medium); white-space: nowrap; }
+.plot { position: relative; height: 120px; touch-action: pan-y; cursor: crosshair; }
+.plot svg { display: block; width: 100%; height: 100%; overflow: visible; }
+.grid { stroke: var(--line); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.line { fill: none; stroke: var(--ink-0); stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; vector-effect: non-scaling-stroke; }
+.cross { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--line-2); pointer-events: none; }
+.mark { position: absolute; width: 8px; height: 8px; margin: -4px 0 0 -4px; border-radius: 50%; background: var(--ink-0); box-shadow: 0 0 0 2px var(--bg-1); pointer-events: none; }
+.yTop, .yMid { position: absolute; left: 0; padding: 1px 4px 0 0; color: var(--ink-2); font-size: 10.5px; line-height: 1.2; pointer-events: none; }
+.yTop { top: 0; }
+.yMid { top: 50%; }
+.plotEmpty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--ink-2); font-size: var(--text-xs); pointer-events: none; }
+.xAxis { display: flex; justify-content: space-between; margin-top: 6px; color: var(--ink-2); font-size: 10.5px; }
+
+/* Lists: a number column on the right. */
+.num { flex: none; min-width: 64px; text-align: right; color: var(--ink-0); white-space: nowrap; }
+.cols { display: flex; gap: 0; padding-right: 34px; color: var(--ink-2); font-size: var(--text-xs); }
+.cols span { min-width: 64px; text-align: right; }
+.agentRow { width: 100%; border: 0; border-top: 1px solid var(--line); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.agentRow:first-child { border-top: 0; }
+@media (hover: hover) { .agentRow:hover { background: var(--bg-2); } }
+.agentRow:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: -1.5px; }
+.chev { flex: none; width: 12px; display: grid; place-items: center; color: var(--ink-2); }
+.pair { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.checked { color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
+.place { align-items: center; }
+.placeName { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.share { display: block; height: 3px; margin-top: 4px; border-radius: 2px; background: var(--bg-3); overflow: hidden; }
+.share i { display: block; height: 100%; border-radius: 2px; background: var(--ink-2); }
+
+/* The Health | Files switch of the head. */
+.tabs { margin-left: auto; }
+
+/* ---- the Files tab: a path bar, the tools, one row per entry ---- */
+.files { flex: 1; min-height: 0; display: flex; flex-direction: column; font-size: var(--text-sm); }
+.pathBar { flex: none; display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 20px; border-bottom: 1px solid var(--line); }
+.crumbs { flex: 1; min-width: 0; display: flex; align-items: center; flex-wrap: wrap; gap: 2px; }
+.crumb { display: inline-flex; align-items: center; gap: 2px; color: var(--ink-2); }
+.crumb button { height: 24px; padding: 0 6px; border: 0; border-radius: 5px; background: none; color: var(--ink-1); font: var(--weight-regular) var(--text-sm) var(--font-mono); cursor: pointer; }
+.crumb button[aria-current="page"] { color: var(--ink-0); font-weight: var(--weight-medium); }
+@media (hover: hover) { .crumb button:hover { background: var(--bg-2); color: var(--ink-0); } }
+.crumb button:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: -1.5px; }
+.tools { flex: none; display: flex; align-items: center; gap: 10px; padding: 10px 20px; }
+.filter { flex: 1; max-width: 280px; min-width: 0; }
+.tools .checked { flex: 1; text-align: right; overflow: hidden; text-overflow: ellipsis; }
+.thead, .fileRow { display: grid; grid-template-columns: 16px minmax(0, 1fr) 84px 108px; align-items: center; gap: 10px; padding: 0 20px; }
+.thead { flex: none; height: 28px; border-bottom: 1px solid var(--line); }
+.th { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0; border: 0; background: none; color: var(--ink-2); font: var(--weight-regular) var(--text-xs) var(--font-sans); cursor: pointer; }
+.th[aria-pressed="true"] { color: var(--ink-0); }
+.th:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; border-radius: 4px; }
+.right { justify-self: end; text-align: right; }
+.rows { flex: 1; min-height: 0; overflow-y: auto; padding-bottom: 24px; }
+.fileRow { width: 100%; min-height: 32px; border: 0; border-bottom: 1px solid var(--line); background: none; color: var(--ink-0); font: inherit; text-align: left; cursor: pointer; }
+.fileRow:disabled { cursor: default; }
+@media (hover: hover) { button.fileRow:hover:not(:disabled) { background: var(--bg-2); } }
+.fileRow:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: -1.5px; }
+.ic { display: grid; place-items: center; color: var(--ink-2); }
+.nameCol { min-width: 0; display: flex; align-items: baseline; gap: 10px; }
+.nm { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sizeCol, .colChanged { color: var(--ink-1); font-size: var(--text-xs); white-space: nowrap; }
+.tagLink { margin-left: 6px; color: var(--ink-2); font-size: var(--text-xs); }
+/* A refused entry: the name, a lock and the reason. Nothing to press. */
+.locked { grid-template-columns: 16px minmax(0, 1fr); cursor: default; }
+.locked .nm { flex: none; max-width: 50%; color: var(--ink-2); }
+.why { min-width: 0; color: var(--ink-2); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.foot { margin: 12px 20px 0; color: var(--ink-2); font-size: var(--text-xs); }
+.loneAct { text-align: center; }
+
+/* The private places of the user. */
+.privBar { flex: none; display: flex; align-items: center; gap: 4px; padding: 0 14px 6px; }
+.privPanel { flex: none; display: grid; gap: 6px; margin: 0 20px 10px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); }
+.privHelp { margin: 0; color: var(--ink-2); font-size: var(--text-xs); }
+.privRow { display: flex; align-items: center; gap: 10px; min-height: 30px; }
+.privPath { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.privAdd { display: flex; gap: 8px; }
+.privAdd input { flex: 1; min-width: 0; font-family: var(--font-mono); }
+
+/* One file: a bar with its facts and its actions, then the viewer of the code explorer. */
+.fileView { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+.fileBar { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-height: 44px; padding: 6px 20px; border-bottom: 1px solid var(--line); }
+.backBtn { padding-left: 4px; }
+.fileName { min-width: 0; font-family: var(--font-mono); font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.fileFacts { flex: 1; min-width: 0; color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
+.fileBody { flex: 1; min-height: 0; overflow: auto; }
+
+/* ---- the Clean-up tab: the total and the button, then one row per thing ---- */
+.auditHead { display: flex; align-items: flex-start; gap: 16px; margin: 0 0 20px; padding: 16px; border: 1px solid var(--line); border-radius: var(--radius); }
+.auditTotal { font-size: var(--text-lg); font-weight: var(--weight-semibold); line-height: 1.3; }
+.auditHelp { margin: 0 2px 8px; }
+.auditMsg { margin: -8px 2px 18px; }
+.auditRow { display: grid; gap: 2px; padding: 10px 12px; }
+.auditRow + .auditRow { border-top: 1px solid var(--line); }
+.auditTop { display: flex; align-items: baseline; gap: 10px; }
+.auditWhat { flex: 1; min-width: 0; color: var(--ink-0); }
+.auditWhere { color: var(--ink-1); font-family: var(--font-mono); font-size: var(--text-xs); overflow-wrap: anywhere; }
+.auditText { color: var(--ink-1); }
+.auditNote { color: var(--warn); font-size: var(--text-xs); }
+.auditFacts { color: var(--ink-2); font-size: var(--text-xs); }
+.auditBtns { display: flex; gap: 8px; margin-top: 6px; }
+.auditAsk { display: grid; gap: 2px; margin-top: 6px; padding: 10px 12px; border: 1px solid var(--line-2); border-radius: var(--radius-sm); }
+.auditAskAll { margin: 0 0 10px; }
+
+/* ---- phone ---- */
+.phonePage { display: flex; flex-direction: column; height: 100%; min-height: 0; background: var(--bg-0); color: var(--ink-0); font-family: var(--font-sans); font-variant-numeric: tabular-nums; }
+.phoneScroll { flex: 1; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; padding-bottom: env(safe-area-inset-bottom, 0px); }
+.phoneBody { font-size: var(--text-phone-body); line-height: 1.45; }
+.phoneBody .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.phoneBody .tile, .phoneBody .chart, .phoneBody .warn { background: var(--bg-1); }
+.phoneBody .charts, .phoneBody .pair { grid-template-columns: minmax(0, 1fr); }
+.phoneBody .pair { gap: 0; }
+.phoneBody .tileValue { font-size: 18px; }
+.phoneBody .switch button { height: 30px; padding: 0 12px; font-size: var(--text-sm); }
+.phoneBody .num { min-width: 58px; font-size: var(--text-sm); }
+.phoneBody .cols span { min-width: 58px; }
+.phoneBody .agentRow { min-height: 48px; }
+.phoneBody .tileSub { white-space: normal; }
+.phoneBody .agentRow > span:first-child { flex: 1; max-width: none; }
+.phoneBody .agentRow > span:nth-child(2) { display: none; }
+.files[data-phone] { background: var(--bg-0); font-size: var(--text-phone-body); }
+.files[data-phone] .pathBar, .files[data-phone] .tools, .files[data-phone] .thead, .files[data-phone] .fileRow { padding-left: 16px; padding-right: 16px; }
+.files[data-phone] .thead, .files[data-phone] .fileRow { grid-template-columns: 18px minmax(0, 1fr) auto; }
+.files[data-phone] .locked { grid-template-columns: 18px minmax(0, 1fr); }
+.files[data-phone] .colChanged { display: none; }
+.files[data-phone] .fileRow { min-height: 50px; }
+.files[data-phone] .nameCol { flex-direction: column; align-items: stretch; gap: 1px; }
+.files[data-phone] .locked .nm { max-width: none; }
+.files[data-phone] .why { white-space: normal; font-size: var(--text-phone-sm); }
+.files[data-phone] .tools { flex-wrap: wrap; }
+.files[data-phone] .filter { flex: 1 1 100%; max-width: none; height: 36px; font-size: 16px; }
+.files[data-phone] .crumb button { height: 32px; }
+.files[data-phone] .tools .checked { text-align: left; white-space: normal; }
+.phonePage .tabs button { height: 30px; padding: 0 12px; font-size: var(--text-sm); }
+.phonePage .fileBar { padding-left: 12px; padding-right: 12px; }
+.files[data-phone] .privBar { padding: 0 10px 6px; flex-wrap: wrap; }
+.files[data-phone] .privPanel { margin: 0 16px 10px; background: var(--bg-1); }
+.files[data-phone] .privAdd { flex-wrap: wrap; }
+.files[data-phone] .privAdd input { flex: 1 1 100%; height: 36px; font-size: 16px; }
+.files[data-phone] .privAdd button, .files[data-phone] .privRow button, .files[data-phone] .privBar button { height: 36px; }
+.phoneBody .auditHead { flex-direction: column; background: var(--bg-1); }
+.phoneBody .auditHead button { align-self: stretch; justify-content: center; }
+.phoneBody .auditWhere, .phoneBody .auditFacts, .phoneBody .auditNote { font-size: var(--text-phone-sm); }
+.phonePage .tabs button { padding: 0 9px; }
+.phoneBody .auditBtns .btn { flex: 1; justify-content: center; }

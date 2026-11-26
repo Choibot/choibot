@@ -1,0 +1,31 @@
+/* src/components/LeadAvatar.module.css — the lead avatar: a pixel sprite on a neutral tile. The
+   tile is the one grey that differs per theme; the sprite's colours are the same in both.
+   `--av-ring` is the colour behind the avatar (a row sets it), for the ring of the status dot. */
+.av {
+  --av-tile: #26262a;
+  position: relative;
+  flex: none;
+  display: inline-block;
+  line-height: 0;
+  vertical-align: middle;
+}
+:global(:root[data-theme="light"]) .av { --av-tile: #e2e2e4; }
+.tile { display: block; border-radius: 25%; background: var(--av-tile); }
+
+/* The lead's status dot, on the avatar's corner (the tones of the sidebar's dot). */
+.st {
+  position: absolute;
+  right: -2px;
+  bottom: -2px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px var(--av-ring, var(--bg-0));
+}
+.av[data-size="36"] .st { width: 10px; height: 10px; }
+.av[data-size="12"] .st { display: none; }
+.d_turn { background: var(--turn); }
+.d_run { background: var(--run); }
+.d_ok { background: var(--ok); }
+.d_err { background: var(--err); }
+.d_idle { background: var(--av-ring, var(--bg-0)); border: 1.5px solid var(--idle); }

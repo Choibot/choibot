@@ -1,0 +1,1048 @@
+#!/bin/bash -p
+# choibot-agent-exec — the one privilege wrapper of a hardened ChoiBot
+# (spec Appendix B step 3, Phase 2c). Installed as /usr/local/bin/choibot-agent-exec
+# (root, 0755). The console runs it as the agent user through sudo:
+#
+#   sudo -n -u choibot-agent --preserve-env=<env_keep list> /usr/local/bin/choibot-agent-exec <verb> ...
+#
+# so every dtach session (master, socket, agent CLI) belongs to the agent uid.
+# Verbs (fixed):
+#   spawn <socket> <cwd> -- <cmd> [args...]   start a dtach session (dtach -A)
+#   attach <socket>                           attach a client (dtach -a)
+#   kill <socket>                             SIGTERM the session tree, SIGKILL survivors after 5 s
+#   kill-clients <socket>                     SIGKILL the dtach clients (never the master)
+#   pids <socket>                             the pids of the dtach clients, one per line
+#   probe                                     check the config; prints "ok"
+#   run <file> <cwd>                          run a widget script (stdin passed through), killed at RUN_TIMEOUT;
+#                                             its process group is killed when it ends
+#   claude-auth login|status|logout           the Claude login of the agent user: `claude auth <sub>` with
+#                                             CLAUDE_CONFIG_DIR (from env_keep; inside the agent's home),
+#                                             stdin and stdout passed through (the page's login form;
+#                                             logout: stdin is /dev/null), ended at a fixed time limit
+#                                             (CLAUDE_LOGIN_LIMIT; status and logout: CLAUDE_STATUS_LIMIT)
+#   claude-print <model> [<system prompt>]    one answer of a model with NO tool, on the agents' login: the
+#                                             console's own model calls (the guide, Fill in, the clean-up
+#                                             words, the Brain review). Fixed flags, the prompt on stdin,
+#                                             a new empty folder in /tmp, ended at CLAUDE_PRINT_LIMIT
+#   git-identity <name> <email>               the commit name of the agent user: `git config --global
+#                                             user.name/user.email` as the agent (never a write by path)
+#   claude-task <cwd> <minutes> -- -p <prompt> [flags]
+#                                             a Recurring task (bin/cron-runner.mjs) on the agents' login:
+#                                             claude with the task's prompt in its repo, with tools (it is
+#                                             agent work); only the flags the runner uses; ended at the
+#                                             task's own time + CLAUDE_TASK_MARGIN
+#   repo-clone <repo> <id> <branch> <sha>     an agent's OWN clone of a repo of the console (strong
+#                                             protection): AGENT_HOME_ROOT/clones/<id>, through the
+#                                             transport, with the console's objects as alternates
+#   repo-remove <id>                          remove AGENT_HOME_ROOT/clones/<id>
+#   repo-read <id> state|changed|diff <sha>   read-only git facts of an agent's clone against the
+#                                             console's base commit <sha>: fixed commands, each one
+#                                             ended after REPO_READ_STEP_LIMIT, its output capped and
+#                                             framed ("== <step> <exit> <bytes>", the bytes, "\n")
+#   read-file <path> <max bytes>              the bytes of one regular file, read AS the agent (the
+#                                             console reads no path in a folder that an agent can write)
+#   upload-pack <id> <repo>                   git-upload-pack in AGENT_HOME_ROOT/clones/<id>, as the
+#                                             agent: the console's fetch of the agent's branch (its
+#                                             --upload-pack command; git appends <repo>)
+#   read-thread <path> <offset> <max bytes>   one byte range of a session file (a transcript) in
+#                                             this account's own Claude folder, read AS this account:
+#                                             one line "<size> <mtime ms> <device> <inode>", then the
+#                                             bytes; "absent" for no such file (strong protection: the
+#                                             console cannot open these files itself)
+#   session-ensure <session id> <project>     the session file of a resume in the cwd's project
+#                                             folder, as this account: "present", "linked <from>"
+#                                             (from another project folder of its own), or "absent"
+#
+# The second account of strong protection (server/chief/chiefaccount.ts): with CHIEF_UID and
+# CHIEF_DTACH_DIR in the config, the helper that runs as CHIEF_UID (the fleet master, the leads
+# and the Coordinator) takes its sockets ONLY in CHIEF_DTACH_DIR (where the workers' account can
+# make no entry), its cwd ONLY in AGENT_HOME_ROOT/chief (its homes), and only the verbs probe,
+# spawn, attach, kill, kill-clients, pids and claude-auth (its own sign-in). The helper of any other uid never takes a cwd in
+# AGENT_HOME_ROOT/chief. Without the two keys everything is as before.
+#
+# It refuses (exit 2, one line on stderr) a socket not directly inside DTACH_DIR
+# or not named choibot-*.sock or choibot-*.sock (the socket prefix of a new install and
+# of one with the old names; service sockets <prefix>svc-* stay console-uid), a cwd
+# outside WORKTREE_ROOT, WORKSPACE_DIR and AGENT_HOME_ROOT, and any env key
+# outside the allowlist: the command gets a fresh env (env -i) with only the
+# allowlisted keys that are set, plus its own PATH and HOME.
+#
+# `bash -p`: never read BASH_ENV/ENV, never import shell functions, ignore
+# SHELLOPTS, BASHOPTS, CDPATH and GLOBIGNORE from the caller env.
+set -euo pipefail
+
+# Own commands come from the system dirs only, never from the caller's PATH.
+PATH=/usr/sbin:/usr/bin:/sbin:/bin
+# A fixed locale: LANG arrives through env_keep and would change what the
+# [[ =~ ]] ranges and [[:cntrl:]] below match. env -i keeps it from the agent.
+export LC_ALL=C
+
+readonly ME=choibot-agent-exec
+# The sudoers env_keep list (deploy/choibot-agent-exec.sudoers.example). The
+# console's SUDO_ENV_KEEP is the part of it with the keys of its install: the
+# CHOIBOT_* keys on an install with the old names, the CHOIBOT_* keys on a new one.
+readonly ENV_KEEP=(CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS PORT CLAUDE_CONFIG_DIR CODEX_HOME TERM LANG CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL CRON_DATA_DIR TZ CHOIBOT_AGENT_ID CHOIBOT_AGENT_PASS CHOIBOT_WIDGET_DIR CHOIBOT_CRON_SPOOL)
+# What a widget script gets (server/widgets/runner.ts scriptEnv), PATH, HOME
+# and USER set here.
+readonly RUN_ENV_KEEP=(LANG TZ CHOIBOT_WIDGET_DIR CHOIBOT_AGENT_ID CHOIBOT_WIDGET_DIR CHOIBOT_AGENT_ID)
+# Shared by spawn (-A) and attach (-a), as DTACH_OPTS in server/agents/terminal.ts.
+readonly DTACH_OPTS=(-E -z -r winch)
+# Grace between SIGTERM and SIGKILL (KILL_GRACE_MS in terminal.ts), in 0.1 s steps.
+readonly KILL_GRACE_STEPS=50
+# claude-auth: the longest a login may live (the link time of the page, 15 min, + the check of a
+# code, 1 min, + a margin; server/agents/claudelogin.ts LINK_MS, CHECK_MS) and a status read (a
+# little under the console's wait, STATUS_MS 20 s). Then SIGTERM, and SIGKILL 5 s later.
+readonly CLAUDE_LOGIN_LIMIT=1020
+readonly CLAUDE_STATUS_LIMIT=15
+# claude-print: the longest model call of the console (the Brain review, DISTILL_TIMEOUT_MS 600 s)
+# + a margin. The console stops a shorter call itself (SIGTERM, relayed by sudo).
+readonly CLAUDE_PRINT_LIMIT=660
+# The flags of claude-print, before the model's name and the system prompt: no built-in tool, no
+# user, project or local settings (hooks, plugins), no MCP server, nothing kept. The same list as
+# the console's own calls (server/guide/model.ts GUIDE_ARGV, server/chief/brain/distill.ts DISTILL_ARGV).
+readonly CLAUDE_PRINT_FLAGS=(-p --output-format json --tools "" --restricted --strict-mcp-config --no-session-persistence)
+# claude-task: the runner stops a task at its own time (TERM, relayed by sudo); the helper ends it
+# this many seconds later in any case. A task takes 1 to 1440 minutes.
+readonly CLAUDE_TASK_MARGIN=60
+# repo-clone: what git ignores in an agent's clone (the console's folders and hook settings file
+# in a repo, under the names of a new install and of an old one: server/agents/upload.ts EXCLUDES).
+readonly CLONE_EXCLUDES=(.choibot/ .choibot-hooks.json .choibot/ .choibot-hooks.json)
+# read-file: the largest file it gives (the console asks for less: 5 MB for an image).
+readonly READ_FILE_MAX=8388608
+# read-thread: the most bytes of one call (the console reads a thread in 1 MiB parts), and the
+# time one read may take.
+readonly READ_THREAD_MAX=4194304
+readonly READ_THREAD_LIMIT=20
+# repo-read: the time of one git step, and the most bytes of its output: a list (names, counts) and
+# the diff. The console keeps the whole answer in memory.
+readonly REPO_READ_STEP_LIMIT=30
+readonly REPO_READ_LIST_MAX=1048576
+readonly REPO_READ_DIFF_MAX=4194304
+# upload-pack: the longest fetch of an agent's branch by the console.
+readonly UPLOAD_PACK_LIMIT=300
+# The shape of an agent id (server/ids.ts RECORD_ID_RE).
+readonly AGENT_ID_RE='^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$'
+# The trust of the clones' folder in the agents' Claude config (repo-clone): ONE key of ONE file,
+# <CLAUDE_CONFIG_DIR>/.claude.json projects["<real clones folder>"].hasTrustDialogAccepted = true
+# (and the empty fields that Claude Code gives a new project entry). Claude checks the parents of a
+# folder too, so every clone below is trusted. Written to a new file in the same folder, then
+# renamed. Run as the agent user with the Node of AGENT_PATH.
+readonly TRUST_JS='
+const fs = require("fs");
+const [file, dir] = process.argv.slice(1);
+let j = {};
+try { j = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) { if (e.code !== "ENOENT") process.exit(3); }
+if (typeof j !== "object" || j === null || Array.isArray(j)) process.exit(3);
+if (typeof j.projects !== "object" || j.projects === null || Array.isArray(j.projects)) j.projects = {};
+const cur = typeof j.projects[dir] === "object" && j.projects[dir] !== null ? j.projects[dir] : {};
+if (cur.hasTrustDialogAccepted === true) process.exit(0);
+j.projects[dir] = { allowedTools: [], mcpContextUris: [], mcpServers: {}, enabledMcpjsonServers: [], disabledMcpjsonServers: [],
+  hasClaudeMdExternalIncludesApproved: false, hasClaudeMdExternalIncludesWarningShown: false, ...cur, hasTrustDialogAccepted: true };
+const tmp = `${file}.trust-${process.pid}`;
+fs.writeFileSync(tmp, JSON.stringify(j, null, 2), { mode: 0o600 });
+fs.renameSync(tmp, file);
+'
+
+
+# One reason line on stderr, exit 2.
+die() {
+  local msg="$*"
+  printf '%s: %s\n' "$ME" "${msg//$'\n'/ }" >&2
+  exit 2
+}
+
+# ---- config -----------------------------------------------------------------
+# CHOIBOT_AGENT_EXEC_CONF is a test hook only. It is not in the sudoers env_keep
+# list, so sudo's env_reset strips it: a caller going through sudo always gets
+# /etc/choibot-agent-exec.conf (root-owned) and cannot point the helper at its own
+# config.
+CONF=${CHOIBOT_AGENT_EXEC_CONF:-/etc/choibot-agent-exec.conf}
+
+# Set only from the conf file (never from the env: these names are not env keys).
+cf_dtach_dir='' cf_dtach_bin='' cf_worktree_root='' cf_workspace_dir='' cf_agent_home_root=''
+cf_run_timeout='' cf_agent_path='' cf_chief_uid='' cf_chief_dtach_dir=''
+
+# Plain KEY=VALUE lines, never sourced or evaluated. Blank lines, comments,
+# unknown keys and other lines are ignored; the last value of a key wins.
+load_conf() {
+  [[ -f $CONF && -r $CONF ]] || die "config not readable: $CONF"
+  local line key val
+  while IFS= read -r line || [[ -n $line ]]; do
+    line=${line%$'\r'}
+    if [[ ! $line =~ ^[[:space:]]*([A-Z_][A-Z0-9_]*)[[:space:]]*=(.*)$ ]]; then continue; fi
+    key=${BASH_REMATCH[1]}
+    val=${BASH_REMATCH[2]}
+    val=${val#"${val%%[![:space:]]*}"}
+    val=${val%"${val##*[![:space:]]}"}
+    case $key in
+      DTACH_DIR) cf_dtach_dir=$val ;;
+      DTACH_BIN) cf_dtach_bin=$val ;;
+      WORKTREE_ROOT) cf_worktree_root=$val ;;
+      WORKSPACE_DIR) cf_workspace_dir=$val ;;
+      AGENT_HOME_ROOT) cf_agent_home_root=$val ;;
+      RUN_TIMEOUT) cf_run_timeout=$val ;;
+      AGENT_PATH) cf_agent_path=$val ;;
+      CHIEF_UID) cf_chief_uid=$val ;;
+      CHIEF_DTACH_DIR) cf_chief_dtach_dir=$val ;;
+      *) ;;
+    esac
+  done < "$CONF"
+
+  local k v
+  for k in DTACH_DIR DTACH_BIN WORKTREE_ROOT WORKSPACE_DIR AGENT_HOME_ROOT; do
+    case $k in
+      DTACH_DIR) v=$cf_dtach_dir ;;
+      DTACH_BIN) v=$cf_dtach_bin ;;
+      WORKTREE_ROOT) v=$cf_worktree_root ;;
+      WORKSPACE_DIR) v=$cf_workspace_dir ;;
+      AGENT_HOME_ROOT) v=$cf_agent_home_root ;;
+    esac
+    [[ -n $v ]] || die "config: $k missing in $CONF"
+    [[ $v == /* ]] || die "config: $k must be an absolute path"
+  done
+  [[ $cf_dtach_bin != *=* ]] || die "config: DTACH_BIN must not contain '='"
+
+  # The real paths, compared on path boundaries. A root of / would allow everything.
+  DTACH_DIR_REAL=$(root_real DTACH_DIR "$cf_dtach_dir")
+  WORKTREE_ROOT_REAL=$(root_real WORKTREE_ROOT "$cf_worktree_root")
+  WORKSPACE_DIR_REAL=$(root_real WORKSPACE_DIR "$cf_workspace_dir")
+  AGENT_HOME_ROOT_REAL=$(root_real AGENT_HOME_ROOT "$cf_agent_home_root")
+
+  # The second account: both keys or none. As that account, its own dtach folder and homes.
+  CHIEF_HOMES_REAL=''
+  IS_CHIEF=0
+  if [[ -n $cf_chief_uid || -n $cf_chief_dtach_dir ]]; then
+    [[ $cf_chief_uid =~ ^[1-9][0-9]{0,9}$ ]] || die "config: CHIEF_UID must be a uid (not 0)"
+    [[ $cf_chief_dtach_dir == /* ]] || die "config: CHIEF_DTACH_DIR must be an absolute path"
+    local chief_dtach_real
+    chief_dtach_real=$(root_real CHIEF_DTACH_DIR "$cf_chief_dtach_dir")
+    [[ $chief_dtach_real != "$DTACH_DIR_REAL" ]] || die "config: CHIEF_DTACH_DIR must not be DTACH_DIR"
+    CHIEF_HOMES_REAL=$AGENT_HOME_ROOT_REAL/chief
+    if [[ $(id -u) == "$cf_chief_uid" ]]; then
+      IS_CHIEF=1
+      DTACH_DIR_REAL=$chief_dtach_real
+    fi
+  fi
+
+  RUN_TIMEOUT=${cf_run_timeout:-30}
+  [[ $RUN_TIMEOUT =~ ^[1-9][0-9]{0,5}$ ]] || die "config: RUN_TIMEOUT must be a whole number of seconds"
+  AGENT_PATH=${cf_agent_path:-/usr/local/bin:/usr/bin:/bin}
+}
+
+root_real() {
+  local real
+  real=$(realpath -m -- "$2") || die "config: $1 cannot be resolved"
+  [[ $real != / ]] || die "config: $1 must not be /"
+  printf '%s\n' "$real"
+}
+
+# ---- checks -----------------------------------------------------------------
+# No control character in a path, checked before any realpath: command
+# substitution drops trailing newlines, so "<root>/..\n" would come back as
+# "<root>/..", pass the root check and resolve to the root's parent.
+no_cntrl() {
+  if [[ $2 == *[[:cntrl:]]* ]]; then die "$1 holds a control character"; fi
+}
+
+# A socket: an absolute, normalized path (no ., .., //) directly inside the real
+# DTACH_DIR, named choibot-<id>.sock or choibot-<id>.sock, not a service socket, not a symlink out.
+check_socket() {
+  local s=$1 name norm real
+  no_cntrl socket "$s"
+  [[ $s == /* ]] || die "socket must be an absolute path: $s"
+  norm=$(realpath -m -s -- "$s") || die "socket path cannot be resolved: $s"
+  [[ $norm == "$s" ]] || die "socket path not normalized: $s"
+  name=${s##*/}
+  [[ $name =~ ^(choibot|choibot)-[A-Za-z0-9._-]+\.sock$ ]] || die "socket name refused: $name"
+  [[ $name != choibot-svc-* && $name != choibot-svc-* ]] || die "service socket refused: $name"
+  real=$(realpath -m -- "$s") || die "socket path cannot be resolved: $s"
+  [[ $real == "$DTACH_DIR_REAL/$name" ]] || die "socket outside DTACH_DIR: $s"
+}
+
+# A cwd: an existing dir whose real path is one of the roots or inside one.
+# Sets CWD_REAL.
+check_cwd() {
+  local c=$1 r
+  no_cntrl cwd "$c"
+  [[ $c == /* ]] || die "cwd must be an absolute path: $c"
+  CWD_REAL=$(realpath -m -- "$c") || die "cwd cannot be resolved: $c"
+  # The second account starts only in its own homes; no other account ever starts there.
+  if (( IS_CHIEF )); then
+    if [[ $CWD_REAL == "$CHIEF_HOMES_REAL" || $CWD_REAL == "$CHIEF_HOMES_REAL"/* ]]; then
+      [[ -d $CWD_REAL ]] || die "cwd is not a directory: $c"
+      return 0
+    fi
+    die "cwd outside the persistent agents' homes ($CHIEF_HOMES_REAL): $c"
+  fi
+  if [[ -n $CHIEF_HOMES_REAL && ( $CWD_REAL == "$CHIEF_HOMES_REAL" || $CWD_REAL == "$CHIEF_HOMES_REAL"/* ) ]]; then
+    die "cwd in the persistent agents' homes refused for this account: $c"
+  fi
+  for r in "$WORKTREE_ROOT_REAL" "$WORKSPACE_DIR_REAL" "$AGENT_HOME_ROOT_REAL"; do
+    if [[ $CWD_REAL == "$r" || $CWD_REAL == "$r"/* ]]; then
+      [[ -d $CWD_REAL ]] || die "cwd is not a directory: $c"
+      return 0
+    fi
+  done
+  die "cwd outside WORKTREE_ROOT, WORKSPACE_DIR and AGENT_HOME_ROOT: $c"
+}
+
+need_dtach() {
+  [[ -f $cf_dtach_bin && -x $cf_dtach_bin ]] || die "DTACH_BIN not executable: $cf_dtach_bin"
+}
+
+# The helper's own user from the passwd file (never the caller's HOME/USER).
+agent_identity() {
+  local ent
+  SELF_UID=$(id -u)
+  ent=$(getent passwd "$SELF_UID") || die "no passwd entry for uid $SELF_UID"
+  IFS=: read -r AGENT_USER _ _ _ _ AGENT_HOME _ <<<"$ent"
+  [[ $AGENT_HOME == /* ]] || die "no home dir for uid $SELF_UID"
+}
+
+# The agent env: HOME and PATH set here, plus each env_keep key that is set.
+agent_env() {
+  local k
+  AGENT_ENV=("HOME=$AGENT_HOME" "PATH=$AGENT_PATH")
+  for k in "${ENV_KEEP[@]}"; do
+    if [[ -v $k ]]; then AGENT_ENV+=("$k=${!k}"); fi
+  done
+}
+
+# ---- /proc ------------------------------------------------------------------
+# One pass over /proc: every process's parent (P_PPID) and start time
+# (P_START, clock ticks since boot: tells a process from a later one that
+# reused its pid), and the dtach processes whose argv names the socket
+# (DTACH_ON), as dtachClientPids/sessionTreePids in server/agents/terminal.ts.
+declare -A P_PPID=() P_START=()
+DTACH_ON=()
+scan_proc() {
+  local sock=$1 d pid stat a
+  local -a f argv
+  for d in /proc/[0-9]*; do
+    pid=${d#/proc/}
+    if [[ ! $pid =~ ^[0-9]+$ ]]; then continue; fi
+    { read -r stat < "$d/stat"; } 2>/dev/null || continue
+    # The comm field is in parentheses and can hold spaces: parse after it.
+    read -r -a f <<<"${stat##*") "}"
+    P_PPID[$pid]=${f[1]-}
+    P_START[$pid]=${f[19]-}
+    argv=()
+    { mapfile -d '' -t argv < "$d/cmdline"; } 2>/dev/null || continue
+    if (( ${#argv[@]} < 2 )) || [[ ${argv[0]##*/} != dtach ]]; then continue; fi
+    for a in "${argv[@]:1}"; do
+      if [[ $a == "$sock" ]]; then DTACH_ON+=("$pid"); break; fi
+    done
+  done
+}
+
+# Start time of a live process; fails when gone (or a zombie).
+start_of() {
+  local stat
+  local -a f
+  { read -r stat < "/proc/$1/stat"; } 2>/dev/null || return 1
+  read -r -a f <<<"${stat##*") "}"
+  [[ ${f[0]-} != Z && ${f[0]-} != X && -n ${f[19]-} ]] || return 1
+  printf '%s\n' "${f[19]}"
+}
+
+# True when the pid is still the process the /proc scan saw.
+same_as_scan() {
+  local now
+  now=$(start_of "$1") || return 1
+  [[ -n ${P_START[$1]-} && $now == "${P_START[$1]}" ]]
+}
+
+# True when the real uid of the process is the helper's own uid: the helper
+# never signals or lists a stranger's process.
+own_uid() {
+  local k r rest
+  { while read -r k r rest; do
+      if [[ $k == Uid: ]]; then [[ $r == "$SELF_UID" ]]; return; fi
+    done < "/proc/$1/status"; } 2>/dev/null
+  return 1
+}
+
+# A dtach client: stdin is a terminal. The master daemonizes onto /dev/null.
+is_client() {
+  local fd0
+  fd0=$(readlink -- "/proc/$1/fd/0" 2>/dev/null) || return 1
+  [[ $fd0 == /dev/pts/* ]]
+}
+
+# The cgroup v2 path of a process ("0::<path>").
+cgroup_of() {
+  local line
+  { while IFS= read -r line; do
+      if [[ $line == 0::* ]]; then printf '%s\n' "${line#0::}"; return 0; fi
+    done < "/proc/$1/cgroup"; } 2>/dev/null
+  return 1
+}
+
+# Own-uid dtach clients on the socket, one per line.
+client_pids() {
+  local pid
+  for pid in "${DTACH_ON[@]}"; do
+    if own_uid "$pid" && is_client "$pid"; then printf '%s\n' "$pid"; fi
+  done
+}
+
+# ---- verbs ------------------------------------------------------------------
+cmd_spawn() {
+  [[ $# -ge 4 && $3 == -- ]] || die "usage: spawn <socket> <cwd> -- <cmd> [args...]"
+  local sock=$1 cwd=$2
+  shift 3
+  check_socket "$sock"
+  check_cwd "$cwd"
+  [[ -n $1 && $1 != -* ]] || die "command refused: '$1'"
+  need_dtach
+  agent_identity
+  agent_env
+  cd -P -- "$CWD_REAL" 2>/dev/null || die "cannot enter cwd: $cwd"
+  exec /usr/bin/env -i -- "${AGENT_ENV[@]}" "$cf_dtach_bin" -A "$sock" "${DTACH_OPTS[@]}" "$@"
+}
+
+cmd_attach() {
+  [[ $# -eq 1 ]] || die "usage: attach <socket>"
+  check_socket "$1"
+  need_dtach
+  agent_identity
+  agent_env
+  exec /usr/bin/env -i -- "${AGENT_ENV[@]}" "$cf_dtach_bin" -a "$1" "${DTACH_OPTS[@]}"
+}
+
+cmd_pids() {
+  [[ $# -eq 1 ]] || die "usage: pids <socket>"
+  check_socket "$1"
+  SELF_UID=$(id -u)
+  scan_proc "$1"
+  client_pids
+}
+
+cmd_kill_clients() {
+  [[ $# -eq 1 ]] || die "usage: kill-clients <socket>"
+  check_socket "$1"
+  SELF_UID=$(id -u)
+  scan_proc "$1"
+  local pid
+  # SIGKILL: a client stuck in write() never acts on SIGHUP/SIGTERM. Only the
+  # process the scan saw (same start time), never a later one on its pid.
+  for pid in $(client_pids); do
+    if same_as_scan "$pid"; then kill -KILL "$pid" 2>/dev/null || true; fi
+  done
+}
+
+# The session tree, as sessionTreePids + killSessionTree in terminal.ts: the
+# dtach master and clients on the socket, all their descendants, and every
+# process in the master's own systemd scope (run-*.scope: children that
+# double-forked away from the tree). A cgroup that holds the helper itself is
+# never used. Only processes of the helper's own uid are signalled.
+cmd_kill() {
+  [[ $# -eq 1 ]] || die "usage: kill <socket>"
+  check_socket "$1"
+  SELF_UID=$(id -u)
+  scan_proc "$1"
+
+  local pid kid cg self_cg m i n
+  local -a roots=() queue=() members=()
+  local -A kids=() found=() start=()
+  for pid in "${DTACH_ON[@]}"; do
+    if own_uid "$pid"; then roots+=("$pid"); fi
+  done
+  if (( ${#roots[@]} == 0 )); then return 0; fi
+
+  for pid in "${!P_PPID[@]}"; do
+    if [[ -n ${P_PPID[$pid]} ]]; then kids[${P_PPID[$pid]}]+=" $pid"; fi
+  done
+  queue=("${roots[@]}")
+  i=0
+  while (( i < ${#queue[@]} )); do
+    pid=${queue[i]}
+    i=$((i + 1))
+    if [[ -n ${found[$pid]-} ]]; then continue; fi
+    found[$pid]=1
+    for kid in ${kids[$pid]-}; do queue+=("$kid"); done
+  done
+
+  self_cg=$(cgroup_of $$) || self_cg=''
+  if [[ -n $self_cg ]]; then
+    for pid in "${roots[@]}"; do
+      cg=$(cgroup_of "$pid") || continue
+      if [[ ! $cg =~ /run-[^/]+\.scope$ || $cg == "$self_cg" ]]; then continue; fi
+      members=()
+      { mapfile -t members < "/sys/fs/cgroup$cg/cgroup.procs"; } 2>/dev/null || continue
+      for m in "${members[@]}"; do
+        if [[ $m == "$$" || $m == "$PPID" ]]; then continue 2; fi
+      done
+      for m in "${members[@]}"; do
+        if [[ $m =~ ^[0-9]+$ ]]; then found[$m]=1; fi
+      done
+    done
+  fi
+  unset 'found[$$]'
+
+  # Each target with its start time. A pid the scan saw must still be that
+  # process (its start time equals P_START): the tree was built from the scan.
+  # A scope member that started after the scan has no P_START entry.
+  for pid in "${!found[@]}"; do
+    if own_uid "$pid" && start[$pid]=$(start_of "$pid") \
+      && [[ -z ${P_START[$pid]-} || ${start[$pid]} == "${P_START[$pid]}" ]]; then :
+    else unset 'start[$pid]'; fi
+  done
+  for pid in "${!start[@]}"; do
+    kill -TERM "$pid" 2>/dev/null || true
+  done
+
+  # Wait for the tree to go, at most the grace; then SIGKILL what is still
+  # there (same pid, same start time).
+  n=0
+  while (( n < KILL_GRACE_STEPS )); do
+    if ! any_left start; then return 0; fi
+    sleep 0.1
+    n=$((n + 1))
+  done
+  for pid in "${!start[@]}"; do
+    if [[ $(start_of "$pid" || true) == "${start[$pid]}" ]]; then
+      kill -KILL "$pid" 2>/dev/null || true
+    fi
+  done
+}
+
+# True while a process of the named pid→start map still lives.
+any_left() {
+  local -n left=$1
+  local pid
+  for pid in "${!left[@]}"; do
+    if [[ $(start_of "$pid" || true) == "${left[$pid]}" ]]; then return 0; fi
+  done
+  return 1
+}
+
+cmd_probe() {
+  [[ $# -eq 0 ]] || die "usage: probe"
+  need_dtach
+  if (( IS_CHIEF )); then
+    [[ -d $DTACH_DIR_REAL ]] || die "CHIEF_DTACH_DIR is not a directory: $cf_chief_dtach_dir"
+    [[ -d $CHIEF_HOMES_REAL ]] || die "the persistent agents' homes are not a directory: $CHIEF_HOMES_REAL"
+  else
+    [[ -d $DTACH_DIR_REAL ]] || die "DTACH_DIR is not a directory: $cf_dtach_dir"
+  fi
+  agent_identity
+  printf 'ok\n'
+}
+
+# run: the pid of timeout, and whether a forwarded signal ended a `wait` early.
+RUN_PID='' RUN_SIG='' RUN_GOT=0
+
+# A TERM, HUP or INT to the helper (sudo relays the console's): pass it to
+# timeout, which passes it to the script's group.
+run_forward() {
+  RUN_GOT=1
+  RUN_SIG=$1
+  if [[ -n $RUN_PID ]]; then kill -s "$1" "$RUN_PID" 2>/dev/null || :; fi
+}
+
+# A widget script (server/widgets/runner.ts), stdin passed through. timeout
+# runs as a child: it leads its own process group (the agent uid's, which the
+# console cannot signal) and SIGKILLs that group at RUN_TIMEOUT. It does not
+# kill the group when the script ends, so the helper does, after timeout
+# exits: a background job the script started never outlives the run, as with
+# the console's direct runner. The helper then exits with timeout's status,
+# or dies by the same signal when timeout did (SIGKILL at RUN_TIMEOUT).
+cmd_run() {
+  [[ $# -eq 2 ]] || die "usage: run <file> <cwd>"
+  local file=$1 k status sig
+  no_cntrl "run: file" "$file"
+  [[ $file == /* ]] || die "run: file must be an absolute path: $file"
+  check_cwd "$2"
+  [[ -f $file ]] || die "run: not a file: $file"
+  agent_identity
+  local -a env=("PATH=$AGENT_PATH" "HOME=$AGENT_HOME" "USER=$AGENT_USER")
+  for k in "${RUN_ENV_KEEP[@]}"; do
+    if [[ -v $k ]]; then env+=("$k=${!k}"); fi
+  done
+  cd -P -- "$CWD_REAL" 2>/dev/null || die "cannot enter cwd: $2"
+  trap 'run_forward TERM' TERM
+  trap 'run_forward HUP' HUP
+  trap 'run_forward INT' INT
+  # 0<&0: without job control bash gives a background job /dev/null as stdin.
+  /usr/bin/env -i -- "${env[@]}" /usr/bin/timeout -s KILL "$RUN_TIMEOUT" "$file" 0<&0 &
+  RUN_PID=$!
+  if [[ -n $RUN_SIG ]]; then kill -s "$RUN_SIG" "$RUN_PID" 2>/dev/null || :; fi
+  # A trapped signal ends `wait` early (status > 128): wait again. bash keeps
+  # a reaped child's status, so a second wait still reads it. 2>/dev/null:
+  # bash's "Killed" job notice would land in the widget's error text.
+  while :; do
+    RUN_GOT=0
+    status=0
+    wait "$RUN_PID" 2>/dev/null || status=$?
+    (( RUN_GOT )) || break
+  done
+  kill -KILL -- "-$RUN_PID" 2>/dev/null || :
+  trap - TERM HUP INT
+  if (( status > 128 && status <= 128 + 64 )); then
+    sig=$(kill -l "$((status - 128))" 2>/dev/null) || sig=''
+    # Only signals that end a process without a core dump.
+    case $sig in
+      HUP|INT|KILL|USR1|USR2|PIPE|ALRM|TERM) kill -s "$sig" "$$" ;;
+    esac
+  fi
+  exit "$status"
+}
+
+# The Claude login of the agent user (strong protection: one login, the agents' own). The
+# console's page runs it: the link goes to the page, the code comes back on stdin. "Sign out" on
+# the page runs `logout`: Claude Code removes the login from the config dir; it reads nothing,
+# so its stdin is /dev/null. The command
+# is fixed (`claude` from AGENT_PATH, three subcommands); the config dir is the agent's own: an
+# absolute path inside the agent's home. The env is fresh: HOME, PATH, the config dir, LANG, TZ.
+# The command has a hard time limit: Claude Code does not end when its stdin closes, and a stop
+# of the console must never leave a login that waits (`timeout` leads its own process group and
+# ends it whole; there is no terminal here: the console is a service).
+cmd_claude_auth() {
+  [[ $# -eq 1 ]] || die "usage: claude-auth login|status|logout"
+  local limit
+  case $1 in
+    login) limit=$CLAUDE_LOGIN_LIMIT ;;
+    status|logout) limit=$CLAUDE_STATUS_LIMIT ;;
+    *) die "claude-auth: unknown subcommand: $1" ;;
+  esac
+  agent_claude claude-auth
+  cd -P -- "$AGENT_HOME_REAL" 2>/dev/null || die "cannot enter the agent's home"
+  if [[ $1 == logout ]]; then
+    exec /usr/bin/env -i -- "${CLAUDE_ENV[@]}" /usr/bin/timeout -s TERM -k 5 "$limit" claude auth logout < /dev/null
+  fi
+  exec /usr/bin/env -i -- "${CLAUDE_ENV[@]}" /usr/bin/timeout -s TERM -k 5 "$limit" claude auth "$1"
+}
+
+# The agent's identity and the env of its Claude program (claude-auth, claude-print): the config
+# dir from env_keep, absolute, no control character, inside the agent's home after realpath.
+# Sets AGENT_HOME_REAL and CLAUDE_ENV (HOME, PATH, CLAUDE_CONFIG_DIR, NO_COLOR, TERM, LANG, TZ).
+agent_claude() {
+  local verb=$1 dir k
+  [[ -v CLAUDE_CONFIG_DIR ]] || die "$verb: CLAUDE_CONFIG_DIR is not set"
+  no_cntrl CLAUDE_CONFIG_DIR "$CLAUDE_CONFIG_DIR"
+  [[ $CLAUDE_CONFIG_DIR == /* ]] || die "$verb: CLAUDE_CONFIG_DIR must be an absolute path"
+  agent_identity
+  dir=$(realpath -m -- "$CLAUDE_CONFIG_DIR") || die "$verb: CLAUDE_CONFIG_DIR cannot be resolved"
+  AGENT_HOME_REAL=$(realpath -m -- "$AGENT_HOME") || die "$verb: the agent's home cannot be resolved"
+  [[ $dir == "$AGENT_HOME_REAL"/* ]] || die "$verb: CLAUDE_CONFIG_DIR is outside the agent's home"
+  CLAUDE_DIR_REAL=$dir
+  CLAUDE_ENV=("HOME=$AGENT_HOME" "PATH=$AGENT_PATH" "CLAUDE_CONFIG_DIR=$dir" "NO_COLOR=1" "TERM=dumb")
+  for k in LANG TZ; do
+    if [[ -v $k ]]; then CLAUDE_ENV+=("$k=${!k}"); fi
+  done
+}
+
+# One answer of a model with no tool, on the agents' login (strong protection: the console has
+# no login of its own). The flags are fixed here; the console gives only the model's name and
+# the system prompt; the prompt comes on stdin and the JSON answer goes to stdout. It runs in a
+# new empty folder in /tmp (no CLAUDE.md of a repo above it), which goes when the call ends. A
+# TERM, HUP or INT (sudo relays the console's stop) reaches the command, as in `run`.
+cmd_claude_print() {
+  [[ $# -eq 1 || $# -eq 2 ]] || die "usage: claude-print <model> [<system prompt>]"
+  [[ $1 =~ ^[a-z][a-z0-9.-]{0,63}$ ]] || die "claude-print: model name refused: $1"
+  local -a args=("${CLAUDE_PRINT_FLAGS[@]}" --model "$1")
+  if [[ $# -eq 2 ]]; then args+=(--system-prompt "$2"); fi
+  agent_claude claude-print
+  local dir status
+  dir=$(mktemp -d /tmp/choibot-print.XXXXXX) || die "claude-print: no folder for the run"
+  cd -P -- "$dir" || die "claude-print: cannot enter the folder of the run"
+  trap 'run_forward TERM' TERM
+  trap 'run_forward HUP' HUP
+  trap 'run_forward INT' INT
+  /usr/bin/env -i -- "${CLAUDE_ENV[@]}" /usr/bin/timeout -s TERM -k 5 "$CLAUDE_PRINT_LIMIT" claude "${args[@]}" 0<&0 &
+  RUN_PID=$!
+  if [[ -n $RUN_SIG ]]; then kill -s "$RUN_SIG" "$RUN_PID" 2>/dev/null || :; fi
+  while :; do
+    RUN_GOT=0
+    status=0
+    wait "$RUN_PID" 2>/dev/null || status=$?
+    (( RUN_GOT )) || break
+  done
+  trap - TERM HUP INT
+  cd / && rm -rf -- "$dir"
+  exit "$status"
+}
+
+# A Recurring task (bin/cron-runner.mjs, a systemd timer of the console's user) on the agents'
+# login: in strong protection the console has no login of its own, and a task works in a repo with
+# every tool, so it is agent work and runs as the agent user. The cwd is checked as for spawn. The
+# argv must be `-p <prompt>` and then only the flags the runner uses: the merge rule and the brain
+# (--append-system-prompt), the model, the effort, --dangerously-skip-permissions,
+# --setting-sources user and --strict-mcp-config. The env: as for spawn (env_keep: the cron agent
+# id, PORT, CRON_DATA_DIR, …), with the checked config dir. stdout goes back to the runner.
+cmd_claude_task() {
+  [[ $# -ge 5 && $3 == -- ]] || die "usage: claude-task <cwd> <minutes> -- -p <prompt> [flags...]"
+  local cwd=$1 minutes=$2
+  shift 3
+  check_cwd "$cwd"
+  [[ $minutes =~ ^[1-9][0-9]{0,3}$ ]] && (( minutes <= 1440 )) || die "claude-task: minutes refused: $minutes"
+  [[ $1 == -p ]] || die "claude-task: the first argument must be -p"
+  local -a args=(-p "$2")
+  shift 2
+  while (( $# > 0 )); do
+    case $1 in
+      --dangerously-skip-permissions|--strict-mcp-config) args+=("$1"); shift ;;
+      --model)
+        [[ $# -ge 2 && $2 =~ ^[a-z][a-z0-9.-]{0,63}$ ]] || die "claude-task: model name refused"
+        args+=("$1" "$2"); shift 2 ;;
+      --effort)
+        [[ $# -ge 2 && $2 =~ ^[a-z]{1,16}$ ]] || die "claude-task: effort refused"
+        args+=("$1" "$2"); shift 2 ;;
+      --setting-sources)
+        [[ $# -ge 2 && $2 == user ]] || die "claude-task: setting sources other than user refused"
+        args+=("$1" "$2"); shift 2 ;;
+      --append-system-prompt)
+        [[ $# -ge 2 ]] || die "claude-task: --append-system-prompt needs a text"
+        args+=("$1" "$2"); shift 2 ;;
+      *) die "claude-task: argument refused: $1" ;;
+    esac
+  done
+  agent_claude claude-task
+  agent_env
+  local -a env=()
+  local kv
+  for kv in "${AGENT_ENV[@]}"; do
+    if [[ $kv != CLAUDE_CONFIG_DIR=* ]]; then env+=("$kv"); fi
+  done
+  env+=("CLAUDE_CONFIG_DIR=$CLAUDE_DIR_REAL")
+  cd -P -- "$CWD_REAL" 2>/dev/null || die "cannot enter cwd: $cwd"
+  exec /usr/bin/env -i -- "${env[@]}" /usr/bin/timeout -s TERM -k 30 "$(( minutes * 60 + CLAUDE_TASK_MARGIN ))" claude "${args[@]}"
+}
+
+# The commit name of the agent user (strong protection): the user's own name and e-mail, the same
+# as the console's (the Set-up step "commit name"), so that an agent's commits are the user's.
+# `git config --global` as the agent user, with git from AGENT_PATH and the agent's own HOME.
+cmd_git_identity() {
+  [[ $# -eq 2 ]] || die "usage: git-identity <name> <email>"
+  no_cntrl name "$1"
+  no_cntrl email "$2"
+  (( ${#1} >= 1 && ${#1} <= 400 )) || die "git-identity: name refused"
+  [[ $1 != -* && $1 != *[\<\>]* ]] || die "git-identity: name refused"
+  [[ $2 =~ ^[A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,190}$ && $2 != -* ]] || die "git-identity: e-mail refused"
+  agent_identity
+  cd -P -- "$AGENT_HOME" 2>/dev/null || die "cannot enter the agent's home"
+  local -a env=("HOME=$AGENT_HOME" "PATH=$AGENT_PATH")
+  /usr/bin/env -i -- "${env[@]}" git config --global user.name "$1" || die "git-identity: git config failed"
+  exec /usr/bin/env -i -- "${env[@]}" git config --global user.email "$2"
+}
+
+# The folder of the agents' clones: AGENT_HOME_ROOT/clones, a real folder (never a link), made by
+# strong-setup (root, 3770). Sets CLONES.
+clones_root() {
+  CLONES=$AGENT_HOME_ROOT_REAL/clones
+  [[ -d $CLONES && ! -L $CLONES ]] || die "no clones folder: $CLONES"
+  [[ $(realpath -e -- "$CLONES") == "$CLONES" ]] || die "the clones folder is not a real path"
+}
+
+agent_id_ok() {
+  [[ $1 =~ $AGENT_ID_RE ]] || die "agent id refused: $1"
+}
+
+# A branch name as the console takes it (server/agents/worktree.ts validBranchName, hardened):
+# [A-Za-z0-9._/-], no leading "-", no "..", no "//", no "/" at an end, not ".lock" at the end.
+branch_ok() {
+  local b=$1
+  [[ $b =~ ^[A-Za-z0-9._/-]{1,200}$ && $b != -* && $b != *..* && $b != *//* && $b != /* && $b != */ && $b != *.lock ]] \
+    || die "branch name refused: $b"
+}
+
+# An agent's OWN clone of a repo of the console (strong protection, design B): the console's repo
+# stays the console's alone (agents read it), and each agent works in a repo of its own account.
+# The clone goes through git's transport (--no-local: upload-pack, as this agent user), with the
+# console's objects as alternates (--reference: read only, no copy); safe.directory for the
+# console's repo only on this command line. Then the agent's branch at the start commit that the
+# console gave (its own repo computed it), the excludes, and the trust of the clones' folder.
+# The remote `console` of the clone: its upload-pack names the console's repo as safe on its own
+# command line (git refuses a repo of another account, upload-pack too: "dubious ownership"), and
+# it fetches the console's copy of the GitHub branches (refs/remotes/origin/*), so that
+# `git fetch console` + `git merge console/<base>` gives the agent the base that the console
+# fetched last. The repo path goes into that command line, so it takes a plain path only.
+cmd_repo_clone() {
+  [[ $# -eq 4 ]] || die "usage: repo-clone <repo> <id> <branch> <sha>"
+  local repo=$1 id=$2 branch=$3 sha=$4 real dest x
+  agent_id_ok "$id"
+  branch_ok "$branch"
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "start commit refused: $sha"
+  no_cntrl repo "$repo"
+  [[ $repo == /* ]] || die "repo must be an absolute path: $repo"
+  real=$(realpath -e -- "$repo") || die "no repo: $repo"
+  [[ $real == "$WORKSPACE_DIR_REAL"/* && -d $real/.git && ! -L $real/.git ]] || die "repo refused (not a repo of WORKSPACE_DIR): $repo"
+  [[ $real =~ ^/[A-Za-z0-9._/-]+$ ]] || die "repo refused (only letters, digits and . _ - / in its path): $repo"
+  clones_root
+  dest=$CLONES/$id
+  [[ ! -e $dest && ! -L $dest ]] || die "a clone of $id exists"
+  agent_claude repo-clone
+  local -a env=("HOME=$AGENT_HOME" "PATH=$AGENT_PATH")
+  cd -P -- "$CLONES" || die "cannot enter the clones folder"
+  /usr/bin/env -i -- "${env[@]}" git -c safe.directory="$real" -c safe.directory="$real/.git" \
+    clone -q --no-local --reference "$real/.git" --origin console --no-checkout -- "$real" "$dest" \
+    || die "repo-clone: git clone failed"
+  /usr/bin/env -i -- "${env[@]}" git -C "$dest" checkout -q -b "$branch" "$sha" || { rm -rf -- "$dest"; die "repo-clone: no branch $branch at $sha"; }
+  for x in "${CLONE_EXCLUDES[@]}"; do printf '%s\n' "$x"; done >> "$dest/.git/info/exclude"
+  /usr/bin/env -i -- "${env[@]}" git -C "$dest" config remote.console.uploadpack "git -c safe.directory=$real/.git upload-pack" \
+    && /usr/bin/env -i -- "${env[@]}" git -C "$dest" config remote.console.fetch '+refs/remotes/origin/*:refs/remotes/console/*' \
+    || { rm -rf -- "$dest"; die "repo-clone: the remote console could not be set"; }
+  /usr/bin/env -i -- "${CLAUDE_ENV[@]}" node -e "$TRUST_JS" "$CLAUDE_DIR_REAL/.claude.json" "$CLONES" \
+    || printf '%s: the trust of %s in the Claude config failed\n' "$ME" "$CLONES" >&2
+  printf '%s\n' "$dest"
+}
+
+# Remove an agent's clone. The target is AGENT_HOME_ROOT/clones/<id> itself, never a path from the
+# caller; a link there is removed, never followed.
+cmd_repo_remove() {
+  [[ $# -eq 1 ]] || die "usage: repo-remove <id>"
+  agent_id_ok "$1"
+  clones_root
+  cd -P -- "$CLONES" || die "cannot enter the clones folder"
+  rm -rf -- "./$1"
+}
+
+# The console's fetch of an agent's branch (part 3 of design B): git-upload-pack in the agent's own
+# clone, as the agent. The console's git runs this verb as its --upload-pack command and appends the
+# repository path: it must be AGENT_HOME_ROOT/clones/<id> itself. upload-pack is the git operation
+# meant for a repo that is not trusted (git-upload-pack(1), gitsecurityboundary(7)); here it also
+# runs in the agent's uid, on the agent's own repo (no safe.directory). --strict: that .git folder,
+# no search. Ended after UPLOAD_PACK_LIMIT, or after 60 seconds with no data.
+cmd_upload_pack() {
+  [[ $# -eq 2 ]] || die "usage: upload-pack <id> <repo>"
+  local id=$1 dest real
+  agent_id_ok "$id"
+  no_cntrl repo "$2"
+  clones_root
+  dest=$CLONES/$id
+  [[ -d $dest && ! -L $dest && -d $dest/.git && ! -L $dest/.git ]] || die "no clone of $id"
+  real=$(realpath -e -- "$2") || die "upload-pack: no repo: $2"
+  [[ $real == "$dest" ]] || die "upload-pack: the repo is not the clone of $id"
+  cd -P -- "$dest" || die "cannot enter the clone of $id"
+  agent_identity
+  exec timeout -k 5 "$UPLOAD_PACK_LIMIT" /usr/bin/env -i -- "HOME=$AGENT_HOME" "PATH=$AGENT_PATH" \
+    git upload-pack --strict --timeout=60 "$dest/.git"
+}
+
+# Read-only git facts of an agent's clone, as the agent (its own repo and config): the console's
+# Changes view and git bar. The console gives its base commit (a sha of its own repo; the clone sees
+# its objects through the alternates). Each step is one fixed git command (no caller argument but
+# the checked sha), ended after REPO_READ_STEP_LIMIT; its output is capped (REPO_READ_LIST_MAX or
+# REPO_READ_DIFF_MAX, exit 98 when larger) and framed. A step that fails (a detached HEAD, a time
+# limit) gives its frame with its exit and the read goes on. The diff steps take no external diff,
+# no textconv and no colour; the agent's own git settings still apply, so the console treats every
+# byte as untrusted text.
+cmd_repo_read() {
+  [[ $# -eq 3 ]] || die "usage: repo-read <id> state|changed|diff <sha>"
+  local id=$1 what=$2 sha=$3 dest mb tmp idx read_index=
+  agent_id_ok "$id"
+  [[ $what == state || $what == changed || $what == diff ]] || die "repo-read: unknown read: $what"
+  [[ $sha =~ ^[0-9a-f]{40}$ ]] || die "base commit refused: $sha"
+  clones_root
+  dest=$CLONES/$id
+  [[ -d $dest && ! -L $dest ]] || die "no clone of $id"
+  cd -P -- "$dest" || die "cannot enter the clone of $id"
+  agent_identity
+  tmp=$(mktemp -d /tmp/choibot-read.XXXXXX) || die "repo-read: no temp folder"
+  # shellcheck disable=SC2064
+  trap "rm -rf -- '$tmp'" EXIT
+  local -a env=("HOME=$AGENT_HOME" "PATH=$AGENT_PATH" "GIT_OPTIONAL_LOCKS=0")
+  local -a diff=(diff --no-ext-diff --no-textconv --no-color)
+  # step <name> <max bytes> <git args...>: one framed output, whatever git's exit (errexit is off
+  # for the pipeline: a failed step must not end the read); with read_index set, on that copy of
+  # the index.
+  step() {
+    local name=$1 max=$2 code size
+    shift 2
+    set +e
+    timeout -k 5 "$REPO_READ_STEP_LIMIT" /usr/bin/env -i -- "${env[@]}" ${read_index:+"GIT_INDEX_FILE=$read_index"} \
+      git -c core.quotePath=false "$@" 2>/dev/null | head -c $((max + 1)) > "$tmp/out"
+    code=${PIPESTATUS[0]}
+    set -e
+    size=$(stat -c %s -- "$tmp/out")
+    if (( size > max )); then code=98; : > "$tmp/out"; size=0; fi
+    printf '== %s %d %d\n' "$name" "$code" "$size"
+    cat -- "$tmp/out"
+    printf '\n'
+  }
+  if [[ $what == state ]]; then
+    step head "$REPO_READ_LIST_MAX" symbolic-ref --quiet --short HEAD
+    step sha "$REPO_READ_LIST_MAX" rev-parse --short HEAD
+    step aheadbehind "$REPO_READ_LIST_MAX" rev-list --left-right --count "$sha...HEAD"
+    step staged "$REPO_READ_LIST_MAX" "${diff[@]}" --cached --name-only
+    step unstaged "$REPO_READ_LIST_MAX" "${diff[@]}" --name-only
+    step untracked "$REPO_READ_LIST_MAX" ls-files --others --exclude-standard
+    step stashes "$REPO_READ_LIST_MAX" stash list --format=%gd%x09%gs
+    return 0
+  fi
+  mb=$(timeout -k 5 "$REPO_READ_STEP_LIMIT" /usr/bin/env -i -- "${env[@]}" git merge-base "$sha" HEAD 2>/dev/null) || mb=
+  [[ $mb =~ ^[0-9a-f]{40}$ ]] || die "repo-read: no fork point with $sha"
+  if [[ $what == changed ]]; then
+    step dirty "$REPO_READ_LIST_MAX" "${diff[@]}" --name-only HEAD
+    step namestatus "$REPO_READ_LIST_MAX" "${diff[@]}" --name-status "$mb"
+    step untracked "$REPO_READ_LIST_MAX" ls-files --others --exclude-standard
+    step numstat "$REPO_READ_LIST_MAX" "${diff[@]}" -z --numstat "$mb"
+    return 0
+  fi
+  # diff: the new files too (intent-to-add) on a copy of the index; the clone's own index stays.
+  idx=$(timeout -k 5 "$REPO_READ_STEP_LIMIT" /usr/bin/env -i -- "${env[@]}" git rev-parse --path-format=absolute --git-path index 2>/dev/null) || idx=
+  [[ -n $idx && -f $idx && ! -L $idx ]] || die "repo-read: no index in the clone of $id"
+  cp -- "$idx" "$tmp/index" || die "repo-read: cannot copy the index"
+  timeout -k 5 "$REPO_READ_STEP_LIMIT" /usr/bin/env -i -- "${env[@]}" git ls-files -z --others --exclude-standard 2>/dev/null \
+    | timeout -k 5 "$REPO_READ_STEP_LIMIT" /usr/bin/env -i -- "${env[@]}" "GIT_INDEX_FILE=$tmp/index" \
+      git add -N --pathspec-from-file=- --pathspec-file-nul 2>/dev/null || true
+  read_index=$tmp/index
+  step diff "$REPO_READ_DIFF_MAX" "${diff[@]}" "$mb"
+}
+
+# The bytes of one regular file, read as the agent user: the console never opens a path in a folder
+# that an agent can write (a link in any part of the path then leads only where this user may
+# read). The real path must be inside a root; the size at most the asked one (≤ READ_FILE_MAX).
+cmd_read_file() {
+  [[ $# -eq 2 ]] || die "usage: read-file <path> <max bytes>"
+  local p=$1 max=$2 real r size
+  no_cntrl path "$p"
+  [[ $p == /* ]] || die "read-file: path must be absolute"
+  [[ $max =~ ^[1-9][0-9]{0,8}$ ]] && (( max <= READ_FILE_MAX )) || die "read-file: max refused"
+  real=$(realpath -e -- "$p") || die "read-file: not found"
+  for r in "$WORKTREE_ROOT_REAL" "$WORKSPACE_DIR_REAL" "$AGENT_HOME_ROOT_REAL"; do
+    if [[ $real == "$r"/* ]]; then
+      [[ -f $real ]] || die "read-file: not a regular file"
+      size=$(stat -c %s -- "$real") || die "read-file: cannot read"
+      (( size <= max )) || die "read-file: larger than $max bytes"
+      exec head -c "$max" -- "$real"
+    fi
+  done
+  die "read-file: outside WORKTREE_ROOT, WORKSPACE_DIR and AGENT_HOME_ROOT"
+}
+
+# One byte range of a session file of this account (strong protection): the account's home is
+# 0700, and Claude Code makes its session files 0600 in 0700 folders, so the console cannot open
+# them; the thread view, the stop reason and the subagent list read them through this verb. The
+# path must be normal and inside <the Claude folder>/projects/ (the Claude folder: CLAUDE_CONFIG_DIR,
+# inside this account's home); its last part is never a link; its REAL path must be inside that
+# projects folder too, and a regular file, and that real path is read. (A folder link inside
+# projects/ is followed: the side folder of a session that session-ensure linked from another
+# project folder. A link out of projects/, to the account's login for example, is refused.) The
+# bytes come from an open that follows no link and does not wait on a fifo. The answer is one line
+# of facts, then at most <max bytes> bytes from <offset> (fewer at the end of the file); "absent"
+# when no such file is there. What it prints is the agent's text: the console takes it as data.
+cmd_read_thread() {
+  [[ $# -eq 3 ]] || die "usage: read-thread <path> <offset> <max bytes>"
+  local p=$1 off=$2 max=$3 norm real projects facts size count
+  no_cntrl path "$p"
+  [[ $p == /* ]] || die "read-thread: path must be absolute"
+  [[ $off =~ ^(0|[1-9][0-9]{0,14})$ ]] || die "read-thread: offset refused"
+  [[ $max =~ ^(0|[1-9][0-9]{0,8})$ ]] && (( max <= READ_THREAD_MAX )) || die "read-thread: max refused"
+  agent_claude read-thread
+  projects=$CLAUDE_DIR_REAL/projects
+  norm=$(realpath -m -s -- "$p") || die "read-thread: path cannot be resolved"
+  [[ $norm == "$p" ]] || die "read-thread: path not normalized"
+  [[ $p == "$projects"/* ]] || die "read-thread: outside the projects folder of this account's Claude folder"
+  # The links that are there resolved first: a path out of projects/ is refused, there or not.
+  real=$(realpath -m -- "$p") || die "read-thread: path cannot be resolved"
+  [[ $real == "$projects"/* ]] || die "read-thread: its real path is outside the projects folder"
+  if ! real=$(realpath -e -- "$p" 2>/dev/null); then
+    [[ ! -L $p ]] || die "read-thread: a link"
+    printf 'absent\n'
+    exit 0
+  fi
+  [[ ! -L $p ]] || die "read-thread: a link"
+  [[ $real == "$projects"/* ]] || die "read-thread: its real path is outside the projects folder"
+  [[ -f $real && ! -L $real ]] || die "read-thread: not a regular file"
+  facts=$(LC_ALL=C stat -c '%s %.3Y %d %i' -- "$real") || die "read-thread: cannot read"
+  size=${facts%% *}
+  count=0
+  if (( off < size )); then count=$(( size - off < max ? size - off : max )); fi
+  printf '%s\n' "$facts"
+  (( count > 0 )) || exit 0
+  # A swap of the file between the checks and this read gives only bytes that this account can
+  # read anyway (the verb runs as the account), and the last part is never followed (nofollow).
+  exec /usr/bin/timeout -k 2 "$READ_THREAD_LIMIT" dd if="$real" iflag=nofollow,nonblock,skip_bytes,count_bytes skip="$off" count="$count" bs=65536 status=none
+}
+
+# The session file of a resume, as this account (strong protection: the console cannot look into
+# this account's Claude folder). `claude --resume <id>` looks for <id>.jsonl in the project folder
+# of its cwd (<project>: Claude's name of that cwd). "present": it is there. Else a regular file
+# <id>.jsonl of this account in another project folder (one level, no link in its path) is
+# hard-linked there (copied when a hard link cannot be made), and its side folder <id>/ (its
+# subagents), when it is a real folder, gets a link there: "linked <from project>". "absent": no
+# such session. It changes nothing outside <the Claude folder>/projects/, makes the project folder
+# 0700 and never through a link, never replaces an entry that is there, and a second call prints
+# "present".
+cmd_session_ensure() {
+  [[ $# -eq 2 ]] || die "usage: session-ensure <session id> <project>"
+  local id=$1 project=$2 projects dir target f from='' side tmp
+  [[ $id =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] || die "session-ensure: session id refused"
+  [[ $project =~ ^[A-Za-z0-9_-]{1,255}$ ]] || die "session-ensure: project refused"
+  agent_claude session-ensure
+  projects=$CLAUDE_DIR_REAL/projects
+  if [[ ! -e $projects && ! -L $projects ]]; then printf 'absent\n'; exit 0; fi
+  [[ -d $projects && ! -L $projects && -O $projects ]] || die "session-ensure: the projects folder is not a real folder of this account"
+  dir=$projects/$project
+  target=$dir/$id.jsonl
+  if [[ -e $target || -L $target ]]; then
+    [[ ! -L $dir && ! -L $target && -f $target && -O $target ]] || die "session-ensure: the entry there is not a session file of this account"
+    printf 'present\n'
+    exit 0
+  fi
+  for f in "$projects"/*/"$id.jsonl"; do
+    [[ -f $f && ! -L $f && -O $f && ! -L ${f%/*} ]] || continue
+    from=${f%/*}
+    from=${from##*/}
+    break
+  done
+  if [[ -z $from ]]; then printf 'absent\n'; exit 0; fi
+  if [[ -L $dir ]]; then die "session-ensure: the project folder is a link"; fi
+  if [[ ! -e $dir ]]; then mkdir -m 0700 -- "$dir" || die "session-ensure: cannot make the project folder"; fi
+  [[ -d $dir && ! -L $dir && -O $dir ]] || die "session-ensure: the project folder is not a real folder of this account"
+  # ln never replaces an entry that is there; a copy goes to a new name first, then the same ln.
+  if ! ln -T -- "$f" "$target" 2>/dev/null; then
+    tmp=$(mktemp -- "$dir/.session-ensure.XXXXXX") || die "session-ensure: cannot copy"
+    if ! cp --no-preserve=all -- "$f" "$tmp" || ! ln -T -- "$tmp" "$target"; then rm -f -- "$tmp"; die "session-ensure: cannot copy"; fi
+    rm -f -- "$tmp"
+  fi
+  side=$projects/$from/$id
+  if [[ -d $side && ! -L $side && -O $side && ! -e $dir/$id && ! -L $dir/$id ]]; then
+    ln -s -T -- "$side" "$dir/$id" || :
+  fi
+  printf 'linked %s\n' "$from"
+}
+
+main() {
+  (( $# >= 1 )) || die "usage: $ME spawn|attach|kill|kill-clients|pids|probe|run|claude-auth|claude-print|repo-clone|repo-remove|repo-read|read-file|git-identity|claude-task|upload-pack|read-thread|session-ensure ..."
+  local verb=$1
+  shift
+  case $verb in
+    spawn|attach|kill|kill-clients|pids|probe|run|claude-auth|claude-print|repo-clone|repo-remove|repo-read|read-file|git-identity|claude-task|upload-pack|read-thread|session-ensure) ;;
+    *) die "unknown verb: $verb" ;;
+  esac
+  load_conf
+  # The persistent agents' account drives only its own sessions (no widget script, no model
+  # call, no clone, no file read, no Recurring task, no git): a request for another verb as
+  # that account is refused.
+  if (( IS_CHIEF )); then
+    case $verb in
+      probe|spawn|attach|kill|kill-clients|pids|claude-auth) ;;
+      *) die "verb refused for the persistent agents' account: $verb" ;;
+    esac
+  fi
+  case $verb in
+    spawn) cmd_spawn "$@" ;;
+    attach) cmd_attach "$@" ;;
+    kill) cmd_kill "$@" ;;
+    kill-clients) cmd_kill_clients "$@" ;;
+    pids) cmd_pids "$@" ;;
+    probe) cmd_probe "$@" ;;
+    run) cmd_run "$@" ;;
+    claude-auth) cmd_claude_auth "$@" ;;
+    claude-print) cmd_claude_print "$@" ;;
+    git-identity) cmd_git_identity "$@" ;;
+    claude-task) cmd_claude_task "$@" ;;
+    repo-clone) cmd_repo_clone "$@" ;;
+    repo-remove) cmd_repo_remove "$@" ;;
+    repo-read) cmd_repo_read "$@" ;;
+    upload-pack) cmd_upload_pack "$@" ;;
+    read-file) cmd_read_file "$@" ;;
+    read-thread) cmd_read_thread "$@" ;;
+    session-ensure) cmd_session_ensure "$@" ;;
+  esac
+}
+
+main "$@"
