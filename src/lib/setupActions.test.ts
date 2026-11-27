@@ -125,6 +125,11 @@ describe("the calls", () => {
     await expect(fetchLogin(answer(500, { error: "boom" }))).rejects.toThrow("The console did not answer. Try again.");
     await expect(fetchLogin((async () => { throw new Error("net"); }) as never)).rejects.toThrow("The console did not answer. Try again.");
   });
+  it("shows the console's own sentence of a failed start; the edge's page of a 502 (not JSON) gets the plain line", async () => {
+    await expect(startFirst({}, answer(500, { error: "The agent did not start. Press the button again." }))).rejects.toThrow("The agent did not start. Press the button again.");
+    const edge = (async () => new Response("<!DOCTYPE html><title>Bad gateway | Cloudflare</title>", { status: 502, headers: { "content-type": "text/html" } })) as never;
+    await expect(startFirst({}, edge)).rejects.toThrow("The console did not answer. Try again.");
+  });
 });
 
 describe("the first agent, in plain words", () => {

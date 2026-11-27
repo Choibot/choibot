@@ -11,6 +11,7 @@
 // Recovery stays a deliberate click on Resume.
 import type { AgentRecord, SessionStore } from "./store.js";
 import type { TerminalManager } from "./terminal.js";
+import { hostOf } from "./host.js";
 
 export type SweepDeps = {
   store: Pick<SessionStore, "list" | "patch">;
@@ -51,15 +52,16 @@ export async function sweepDeadAgents(deps: SweepDeps): Promise<string[]> {
     if (now() - rec.createdAt <= graceMs) continue;
     if (deps.skip?.(rec.id)) continue;                 // being relaunched
     if (deps.waits?.(rec.id)) continue;                // waits for a login
-    if (deps.terminals.has(rec.id)) continue;          // attached here
+    const t = hostOf(rec.id) ?? deps.terminals;
+    if (t.has(rec.id)) continue;                       // attached here
     try {
-      if (await deps.terminals.hasSession(rec.id)) continue; // reattachable
+      if (await t.hasSession(rec.id)) continue; // reattachable
       // Re-check after the await, with no await before the patch: a relaunch
       // may have started (skip) or finished (has) meanwhile. skip first, has
       // second: the respawn is tracked before the id leaves the set, so one
       // of the two holds in every interleaving.
       if (deps.skip?.(rec.id)) continue;
-      if (deps.terminals.has(rec.id)) continue;
+      if (t.has(rec.id)) continue;
       // A closed agent whose session ended (one closed before close stopped
       // sessions) is just stopped: no error, no Telegram ping.
       if (rec.closedAt !== undefined) {

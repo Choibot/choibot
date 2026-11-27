@@ -25,6 +25,7 @@ import { registerWidgetsApi } from "./widgets/api.js";
 import { resolveWidgetsDataDir } from "./widgets/paths.js";
 import { reconcileAgents, resumeAgent } from "./agents/recovery.js";
 import { startDeadAgentSweep } from "./agents/sweep.js";
+import { hostOf } from "./agents/host.js";
 import { agentExitHandler } from "./agents/exit.js";
 import { reopenIfClosed, resumeClosedWithPrompt, startClosedPurge } from "./agents/closed.js";
 import { getUsage, peekUsage, registerUsageApi, usageWithin } from "./usage.js";
@@ -520,7 +521,7 @@ async function main() {
     },
     resumeClosed: (id, text) => resumeClosedWithPrompt({
       store, emit: (e) => hub.emitEvent(e),
-      isLive: async (x) => terminals.has(x) || (await terminals.hasSession(x)),
+      isLive: async (x) => { const t = hostOf(x) ?? terminals; return t.has(x) || (await t.hasSession(x)); },
       resume: (rec, o) => resumeAgent(rec, recoveryCtx, o),
     }, id, text),
   });
@@ -1141,7 +1142,10 @@ async function main() {
   // the master. A closed worker keeps its reminders: a due one reopens it and
   // resumes its session with the line as its first turn. The deliverer's boot
   // scan and 60 s tick start in the chief boot below, on an active core only.
-  const isLiveAgent = async (id: string): Promise<boolean> => terminals.has(id) || (await terminals.hasSession(id));
+  const isLiveAgent = async (id: string): Promise<boolean> => {
+    const t = hostOf(id) ?? terminals;
+    return t.has(id) || (await t.hasSession(id));
+  };
   const remindDeliverer = setupReminders(app, chief, {
     agents: store,
     deliverer: {
@@ -1190,7 +1194,7 @@ async function main() {
   try {
     for (const rec of await store.list()) {
       if (rec.status !== "running" && rec.status !== "idle") continue;
-      const alive = await terminals.hasSession(rec.id);
+      const alive = await (hostOf(rec.id) ?? terminals).hasSession(rec.id);
       if (!alive && rec.status === "running") {
         await store.patch(rec.id, { status: "idle" });
         hub.emitEvent({ type: "agent-status", agentId: rec.id, status: "idle" });
@@ -1322,7 +1326,7 @@ async function main() {
     // with the reply as its first turn (an explicit use, see agents/closed.ts).
     const resumeClosed = (agentId: string, text: string) => resumeClosedWithPrompt({
       store, emit: (e) => hub.emitEvent(e),
-      isLive: async (x) => terminals.has(x) || (await terminals.hasSession(x)),
+      isLive: async (x) => { const t = hostOf(x) ?? terminals; return t.has(x) || (await t.hasSession(x)); },
       resume: (rec, o) => resumeAgent(rec, recoveryCtx, o),
     }, agentId, text).catch((e) => {
       console.warn(`[issues] resume of closed agent ${agentId} failed:`, e instanceof Error ? e.message : e);

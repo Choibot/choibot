@@ -140,7 +140,7 @@ describe("the actions, as the user", () => {
     expect(given).toEqual(["Ada <42+ada-dev@users.noreply.github.com>", "Owner <owner@example.com>"]);
     const failed = app({ agentIdentity: async () => false });
     const r = await failed.call("POST", "/api/setup/github/name", user);
-    expect([r.statusCode, r.json()]).toEqual([502, { error: "Your server did not give the name to your agents. Try again." }]);
+    expect([r.statusCode, r.json()]).toEqual([500, { error: "Your server did not give the name to your agents. Try again." }]);
   });
 
   it("changes no commit name that git has", async () => {
@@ -177,7 +177,7 @@ describe("the first agent, as the user", () => {
   });
 
   it.each([
-    ["no-repo", 409, /Pick a repo/], ["working", 409, /works now/], ["busy", 409, /starts now/], ["failed", 502, /did not start/],
+    ["no-repo", 409, /Pick a repo/], ["working", 409, /works now/], ["busy", 409, /starts now/], ["failed", 500, /did not start/],
   ] as const)("says in plain words why it did not start: %s", async (why, code, text) => {
     const { call } = app({ first: { ok: false, why } });
     const res = await call("POST", "/api/setup/first", user);

@@ -15,7 +15,7 @@ import { resolveWidgetsDataDir } from "../widgets/paths.js";
 import { pick, isRuntimeId } from "./runtimes/index.js";
 import type { Preset } from "./runtimes/types.js";
 import { isAgentModel, MODEL_REFUSAL, startModel, type AgentModel } from "./model.js";
-import { claudeHooksPath } from "./runtimes/claude.js";
+import { agentClaudeConfigDir, claudeHooksPath } from "./runtimes/claude.js";
 import { discard } from "./reconcile.js";
 import { listRepos, ensureBaseBranch, defaultBranch } from "./repos.js";
 import { accountExists, isAccountId, listAccounts, preferredAccount, DEFAULT_ACCOUNT, type AccountPaths } from "./accounts.js";
@@ -216,8 +216,10 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
     if (x && folders && runtimeId !== "claude") return { ok: false, code: 400, error: CLONE_CLAUDE_ONLY };
     try {
       if (x && folders) {
+        // The helper's repo-clone needs the agent's CLAUDE_CONFIG_DIR: the same value as its spawn.
+        const claudeDir = agentClaudeConfigDir(id);
         const sha = await startCommit(match.path, base, branch);
-        wt = { path: await cloneForAgent(x, folders, match.path, id, branch, sha), branch };
+        wt = { path: await cloneForAgent(x, folders, match.path, id, branch, sha, claudeDir), branch };
       } else wt = await createWorktree({ repo: match.path, baseBranch: base, branch, root: worktreeRoot, dirName });
     } catch (e) {
       // Most likely: the chosen branch is already checked out in another worktree.

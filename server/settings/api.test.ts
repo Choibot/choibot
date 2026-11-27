@@ -245,11 +245,11 @@ describe("POST /api/settings/telegram/test", () => {
     expect((await b.inject({ method: "POST", url: "/api/settings/telegram/test", headers: user, payload: { target: "nope" } })).statusCode).toBe(400);
     expect(bot.calls).toHaveLength(0);
   });
-  it("a Telegram refusal is a 502 whose text and log line hold no token", async () => {
+  it("a Telegram refusal is a 500 (not 502: the edge's own page would hide it) whose text and log line hold no token", async () => {
     const lines: string[] = [];
     const { a } = app({ bot: fakeBot({ throwWithUrl: true }), log: (s) => lines.push(s) });
     const res = await a.inject({ method: "POST", url: "/api/settings/telegram/test", headers: user, payload: { target: "master" } });
-    expect(res.statusCode).toBe(502);
+    expect(res.statusCode).toBe(500);
     expect(res.body).not.toContain(TOKEN);
     expect(lines.join("\n")).not.toContain(TOKEN);
     expect(lines).toHaveLength(1);

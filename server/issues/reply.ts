@@ -8,6 +8,7 @@ import type { IssueIntake } from "./intake.js";
 import { reopened, summaryOf, type Issue, type IssueStore } from "./store.js";
 import type { TgMessage } from "./telegram.js";
 import { largestPhoto } from "./updates.js";
+import { hostOf } from "../agents/host.js";
 
 export type ReplyTerminals = Pick<TerminalManager, "has" | "hasSession" | "write" | "inputReady"> & {
   reattach(id: string): Promise<unknown>;
@@ -55,6 +56,15 @@ export function withTypingLock<T>(agentId: string, fn: () => Promise<T>): Promis
 export async function typeIntoAgentWhy(
   terminals: ReplyTerminals, agentId: string, text: string, sleep = defaultSleep,
 ): Promise<TypeResult> {
+  const host = hostOf(agentId);
+  if (host) {
+    const r = await host.send(agentId, text);
+    if (typeof r === "string") return r;
+    // Not reached today: the product registers no headless host. Its wiring gives "too-large" to
+    // the callers (TypeResult); until then the line is not sent, and the log says why.
+    console.warn(`[reply] ${agentId}: a message of ${r.bytes} bytes is above the worker's limit of ${r.limit}: not sent`);
+    return "not-live";
+  }
   if (!terminals.has(agentId) && (await terminals.hasSession(agentId))) {
     await terminals.reattach(agentId);
     if (terminals.dialogOn && terminals.has(agentId)) await sleep(REATTACH_SETTLE_MS);

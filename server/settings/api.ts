@@ -225,7 +225,8 @@ export function registerSettingsApi(app: FastifyInstance, d: SettingsApiDeps): {
       } catch (e) {
         const text = scrub(e instanceof Error ? e.message : String(e), token());
         log(`[settings] telegram test to the account failed: ${text}`);
-        return reply.code(502).send({ error: `Telegram refused it: ${text}` });
+        // 500, never 502: Cloudflare (the hosted console's edge) puts its own page in place of the body of an origin 502 or 504.
+        return reply.code(500).send({ error: `Telegram refused it: ${text}` });
       }
     }
     const target = telegramConfig(d.env, chiefOf()).targets.find((x) => x.id === want);
@@ -242,7 +243,7 @@ export function registerSettingsApi(app: FastifyInstance, d: SettingsApiDeps): {
     } catch (e) {
       const text = scrub(e instanceof Error ? e.message : String(e), token());
       log(`[settings] telegram test to ${target.id} failed: ${text}`);
-      return reply.code(502).send({ error: `Telegram refused it: ${text}` });
+      return reply.code(500).send({ error: `Telegram refused it: ${text}` });
     }
   });
 

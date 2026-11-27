@@ -50,6 +50,7 @@ import type { GoOnResult, LimitAgents, LimitLogin } from "../chief/limit/service
 import { isSubagentId } from "./thread.js";
 import { MAX_SUBAGENTS, hasLaterSubagents, newestWrite, openSubagentDir, subagentIdsOf, subagentStates } from "./subagents.js";
 import { resolveWorkspaceDir } from "../defaults.js";
+import { hostOf } from "./host.js";
 
 // Build a RecoveryCtx from the same deps registerAgentApi uses, so the boot
 // reconciler (server/index.ts) and the resume endpoint share one launch path —
@@ -525,7 +526,7 @@ export function registerAgentApi(
     const target = await store.load(id);
     if (target && isMaster(target)) return reply.code(400).send({ error: "a master agent cannot be stopped" });
     markActed(req, id);
-    terminals.kill(id);
+    (hostOf(id) ?? terminals).kill(id);
     await store.patch(id, { status: "done" });
     hub.emitEvent({ type: "agent-status", agentId: id, status: "done" });
     return reply.code(202).send({});
@@ -560,7 +561,7 @@ export function registerAgentApi(
     const rec = await store.load(id);
     if (!rec) return reply.code(404).send({ error: "not found" });
     const reopen = () => reopenIfClosed({ store, emit: (e) => hub.emitEvent(e) }, id);
-    if (terminals.has(id)) { await reopen(); return reply.code(202).send({ id }); } // already live
+    if ((hostOf(id) ?? terminals).has(id)) { await reopen(); return reply.code(202).send({ id }); } // already live
     const outcome = await resumeAgent(rec, recoveryCtx);
     await reopen();
     // A relaunched agent comes up idle; a reattached live one keeps its status
@@ -611,7 +612,8 @@ export function registerAgentApi(
   const sleep = deps.sleep ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   async function tellToGoOn(id: string, to: string, signedOut = false): Promise<void> {
     for (let i = 0; i < 80; i++) {
-      if (terminals.has(id) && terminals.inputReady(id)) break;
+      const t = hostOf(id) ?? terminals;
+      if (t.has(id) && t.inputReady(id)) break;
       await sleep(250);
     }
     for (let i = 0; i < 5; i++) {
@@ -862,7 +864,10 @@ export function registerAgentApi(
         Object.assign(out, await moveAllOf(id, to as string, list));
         if (out.working || out.waits || out.failed) return stop("moves");
       } else {
-        for (const rec of onIt) if (terminals.has(rec.id) || (await terminals.hasSession(rec.id).catch(() => false))) live.push(rec);
+        for (const rec of onIt) {
+          const t = hostOf(rec.id) ?? terminals;
+          if (t.has(rec.id) || (await t.hasSession(rec.id).catch(() => false))) live.push(rec);
+        }
         if ((out.working = live.filter(works).length)) return stop("busy");
       }
       // Basic protection: the mark first (a Recurring run that starts now takes another login),
@@ -873,7 +878,9 @@ export function registerAgentApi(
       if ((out.recurring = await runsOnIt()).length) { await unmark(); return stop("recurring"); }
       const cmd = logoutCommand({ account: id, paths, env: deps.claudeLogin?.env, bin: deps.claudeLogin?.bin, auth });
       const first = await runLogout(cmd);
-      if (!first.ok) { await unmark(); return stop(first.why, 502); }
+      // 500, never 502: Cloudflare (the hosted console's edge) puts its own page in place of the body of an origin 502 or 504, and the page needs this
+      // answer (what ended, what waits) for its words.
+      if (!first.ok) { await unmark(); return stop(first.why, 500); }
       // No process ended before: a sign-out that failed stops no agent. The kept status is of
       // before the sign-out: a start of a persistent agent now reads it again (the second sign-in's
       // wait, chief/chiefwait.ts, then holds it). The other logins: the hold (agents/loginhold.ts)
@@ -895,8 +902,9 @@ export function registerAgentApi(
           if (works(cur)) { out.notEnded++; return; }
           // In silence: no "finished" message or digest line (agents/exit.ts); the record is "done".
           quietExits.add(rec.id);
-          terminals.kill(rec.id);
-          if (!(await waitUntilGone(terminals, rec.id))) { quietExits.delete(rec.id); out.notEnded++; return; }
+          const t = hostOf(rec.id) ?? terminals;
+          t.kill(rec.id);
+          if (!(await waitUntilGone(t, rec.id))) { quietExits.delete(rec.id); out.notEnded++; return; }
           out.stopped++;
           ended.push(rec.id);
           // The second sign-in: it waits for the next one, which starts it (chief/chiefwait.ts).
@@ -920,7 +928,7 @@ export function registerAgentApi(
           out.restarted = out.waiting;
           out.waiting = [];
           await unmark();
-          return stop("still-there", 502);
+          return stop("still-there", 500);
         }
       }
       // The second sign-in: the last read says the login is gone, so each ended agent waits for
@@ -1128,7 +1136,7 @@ export function registerAgentApi(
   app.post("/api/agents/:id/merge", async (req: FastifyRequest, reply: FastifyReply) => {
     if (deps.chief && !(await gateMerge(deps.chief, req, reply))) return reply;
     const { id } = req.params as { id: string };
-    if (terminals.has(id)) return reply.code(409).send({ error: "agent still live — stop it first" });
+    if ((hostOf(id) ?? terminals).has(id)) return reply.code(409).send({ error: "agent still live — stop it first" });
     const loaded = await store.load(id);
     if (!loaded) return reply.code(404).send({ error: "not found" });
     if (isMaster(loaded)) return reply.code(400).send(MASTER_NA);
@@ -1143,7 +1151,7 @@ export function registerAgentApi(
 
   app.post("/api/agents/:id/discard", async (req: FastifyRequest, reply: FastifyReply) => {
     const { id } = req.params as { id: string };
-    if (terminals.has(id)) return reply.code(409).send({ error: "agent still live — stop it first" });
+    if ((hostOf(id) ?? terminals).has(id)) return reply.code(409).send({ error: "agent still live — stop it first" });
     const rec = await store.load(id);
     if (!rec) return reply.code(404).send({ error: "not found" });
     if (isMaster(rec)) return reply.code(400).send(MASTER_NA);
@@ -1159,7 +1167,7 @@ export function registerAgentApi(
     // agent): with no helper the record stays, so a later delete can remove the clone.
     const own = await store.load(id);
     if (own && isClone(own)) cloneExecOrRefuse();
-    terminals.kill(id); // no-op if not live
+    (hostOf(id) ?? terminals).kill(id); // no-op if not live
     const rec = await store.load(id);
     // The master is deletable (kill + forget the record), but it owns no
     // disposable git state: its "worktree" is its own agent home dir, and
@@ -1217,7 +1225,7 @@ export function registerAgentApi(
       if (refusal) return reply.code(refusal.code).send({ error: refusal.error });
     }
     markActed(req, id);
-    const r = await closeAgent({ store, kill: (x) => terminals.kill(x), emit: (e) => hub.emitEvent(e) }, id);
+    const r = await closeAgent({ store, kill: (x) => (hostOf(x) ?? terminals).kill(x), emit: (e) => hub.emitEvent(e) }, id);
     if (r === "not-found") return reply.code(404).send({ error: "not found" });
     if (r === "master") return reply.code(400).send({ error: "a master agent cannot be closed" });
     // A close that did not come from this browser's ✕ (a lead's CLI, another

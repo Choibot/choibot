@@ -25,6 +25,7 @@ import { join } from "node:path";
 import { isClone } from "./agentclone.js";
 import type { ChiefWait } from "../chief/chiefwait.js";
 import type { LoginHold } from "./loginhold.js";
+import { hostOf } from "./host.js";
 
 // The Claude transcript helpers moved into the Claude runtime adapter;
 // re-exported here so existing imports keep working.
@@ -108,8 +109,9 @@ export async function resumeAgent(
   ctx: RecoveryCtx,
   opts: { prompt?: string } = {},
 ): Promise<"resumed" | "cold" | "alive" | "waits"> {
-  if (ctx.terminals.has(rec.id)) return "alive";
-  if (await ctx.terminals.reattach(rec.id)) return "alive";
+  const t = hostOf(rec.id) ?? ctx.terminals;
+  if (t.has(rec.id)) return "alive";
+  if (await t.reattach(rec.id)) return "alive";
   // A persistent agent of the second account waits for that account's sign-in (chief/
   // chiefwait.ts): no session starts, and its record keeps its status.
   if (ctx.chiefWait && !(await ctx.chiefWait.mayStart(rec.id))) return "waits";
@@ -205,10 +207,11 @@ export async function switchAccount(
 ): Promise<"resumed" | "cold" | "patched"> {
   await ctx.store.patch(rec.id, { account });
   const next: AgentRecord = { ...rec, account };
-  const live = ctx.terminals.has(rec.id) || (await hasPersistedSession(ctx.terminals, rec.id));
+  const t = hostOf(rec.id) ?? ctx.terminals;
+  const live = t.has(rec.id) || (await hasPersistedSession(t, rec.id));
   if (!live) return "patched";
-  ctx.terminals.kill(rec.id);
-  if (!(await waitUntilGone(ctx.terminals, rec.id))) {
+  t.kill(rec.id);
+  if (!(await waitUntilGone(t, rec.id))) {
     // The old session would not end. Resuming now would just reattach it, still
     // on the old login, while the record claims the new one — say so instead.
     throw new Error("the running session did not end; try again");
@@ -218,7 +221,7 @@ export async function switchAccount(
   return outcome === "alive" || outcome === "waits" ? "patched" : outcome;
 }
 
-async function hasPersistedSession(terminals: RecoveryCtx["terminals"], id: string): Promise<boolean> {
+async function hasPersistedSession(terminals: Pick<RecoveryCtx["terminals"], "hasSession">, id: string): Promise<boolean> {
   return typeof terminals.hasSession === "function" ? terminals.hasSession(id) : false;
 }
 
@@ -227,7 +230,7 @@ async function hasPersistedSession(terminals: RecoveryCtx["terminals"], id: stri
 // both are gone would either throw ("terminal already exists") or `-A`ttach to
 // the dying master. Bounded: a wedged session falls through and the spawn's
 // own error surfaces instead of hanging the request. Resolves false on timeout.
-export async function waitUntilGone(terminals: RecoveryCtx["terminals"], id: string, timeoutMs = 8000): Promise<boolean> {
+export async function waitUntilGone(terminals: Pick<RecoveryCtx["terminals"], "has" | "hasSession">, id: string, timeoutMs = 8000): Promise<boolean> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (!terminals.has(id) && !(await hasPersistedSession(terminals, id))) {

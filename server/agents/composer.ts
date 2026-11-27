@@ -6,6 +6,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { pasteOf, typeIntoAgentWhy, withTypingLock, type ReplyTerminals } from "../issues/reply.js";
 import type { CaptureLine } from "../chief/brain/capture.js";
+import { hostOf } from "./host.js";
 
 export const MAX_TEXT = 32_000;
 export const DEDUP_KEEP = 200;
@@ -87,7 +88,7 @@ export class ComposerGate {
     // msgId waits here and then sees the first one's result.
     return withTypingLock(id, async (): Promise<InputResult> => {
       if (this.seen(id, msgId)) return { code: 200, body: { delivered: true, duplicate: true } };
-      const t = this.d.terminals;
+      const t = hostOf(id) ?? this.d.terminals;
       const attached = t.has(id);
       if (!attached && !(await t.hasSession(id))) {
         if (!opts.noResume && (await this.d.resumeClosed?.(id, text))) {
@@ -110,7 +111,7 @@ export class ComposerGate {
       // Asked before the paste: the line itself starts a turn of an idle agent.
       const busy = fromUser && (await this.d.isBusy?.(id).catch(() => false)) === true;
       this.d.onTyped?.(id, pasteOf(text) + "\r");
-      const typed = await typeIntoAgentWhy(t, id, text, this.d.sleep);
+      const typed = await typeIntoAgentWhy(this.d.terminals, id, text, this.d.sleep);
       // A dialog of Claude is on its screen: the line would answer it. As a TUI that is not ready.
       if (typed === "dialog") return { code: 409, body: { reason: "starting", dialog: true } };
       if (typed !== "sent") return { code: 409, body: { reason: "not-live" } };

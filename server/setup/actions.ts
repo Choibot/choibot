@@ -94,7 +94,9 @@ export function registerSetupActions(app: FastifyInstance, d: {
     // Strong protection: the agents commit under their own account, with the same name.
     if (d.agentIdentity && !(await shareCommitName(d.agentIdentity, d.commitName))) {
       log("[setup] the commit name did not reach the agents' account");
-      return reply.code(502).send({ error: "Your server did not give the name to your agents. Try again." });
+      // 500, never 502: Cloudflare (the hosted console's edge) puts its own page in place of the body of an origin 502 or 504, and the page then
+      // says only "The console did not answer". The same for each sentence below.
+      return reply.code(500).send({ error: "Your server did not give the name to your agents. Try again." });
     }
     return { ok: true, wrote: r.wrote };
   });
@@ -106,7 +108,7 @@ export function registerSetupActions(app: FastifyInstance, d: {
       return await d.repos.page({ q: typeof q.q === "string" ? q.q : "", page: Number(q.page) || 0, fresh: q.fresh === "1" });
     } catch {
       // The cause (a line of gh) stays on the server.
-      return reply.code(502).send({ error: "GitHub did not give the list of your repos." });
+      return reply.code(500).send({ error: "GitHub did not give the list of your repos." });
     }
   });
 
@@ -120,7 +122,7 @@ export function registerSetupActions(app: FastifyInstance, d: {
     const repo = (req.body as { repo?: unknown } | null)?.repo;
     if (typeof repo !== "string") return reply.code(400).send({ error: "Pick a repo of the list." });
     let r;
-    try { r = await d.repos.clone(repo); } catch { return reply.code(502).send({ error: "GitHub did not give the list of your repos." }); }
+    try { r = await d.repos.clone(repo); } catch { return reply.code(500).send({ error: "GitHub did not give the list of your repos." }); }
     if (r.state === "refused") {
       if (r.why === "busy") return reply.code(409).send({ error: "A copy runs now. Wait until it ends." });
       return reply.code(400).send({ error: r.why === "no-push" ? "GitHub gives no push access to this repo." : "Pick a repo of the list." });
@@ -147,6 +149,6 @@ export function registerSetupActions(app: FastifyInstance, d: {
     if (r.why === "no-repo") return reply.code(409).send({ error: "No repo with push access is on your server. Do the step “Pick a repo” first." });
     if (r.why === "working") return reply.code(409).send({ error: "The first agent works now. Wait until it stops." });
     if (r.why === "busy") return reply.code(409).send({ error: "The agent starts now. Wait a moment." });
-    return reply.code(502).send({ error: "The agent did not start. Press the button again." });
+    return reply.code(500).send({ error: "The agent did not start. Press the button again." });
   });
 }

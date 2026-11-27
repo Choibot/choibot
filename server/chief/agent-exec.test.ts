@@ -5,7 +5,7 @@
 // temp dtach dir. `spawn` and `attach` need a terminal: they run under
 // node-pty. Every process a test starts is killed by pid in afterEach.
 import * as pty from "node-pty";
-import { execFileSync, spawn } from "node:child_process";
+import { execFile, execFileSync, spawn } from "node:child_process";
 import {
   chmodSync, existsSync, linkSync, lstatSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync,
   realpathSync, rmSync, symlinkSync, writeFileSync,
@@ -14,9 +14,13 @@ import { tmpdir, userInfo } from "node:os";
 import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { persistCommand, sessionTreePids } from "../agents/terminal.js";
-import { parseRead } from "../agents/agentclone.js";
+import { parseRead, setCloneExec, type Run as CloneRun } from "../agents/agentclone.js";
+import { spawnAgent } from "../agents/spawn.js";
+import { SessionStore } from "../agents/store.js";
+import { EventHub } from "../events.js";
+import { setAgentHelper } from "./hardened.js";
 
 const HELPER = fileURLToPath(new URL("../../deploy/choibot-agent-exec", import.meta.url));
 const DTACH_BIN = existsSync("/home/dev/.local/bin/dtach")
@@ -1039,6 +1043,49 @@ describe("choibot-agent-exec: repo-clone, repo-remove, read-file", () => {
     g(repo, "update-ref", "refs/remotes/origin/main", "HEAD");
     g(dest, "fetch", "-q", "console");
     expect(g(dest, "rev-parse", "console/main")).toBe(g(repo, "rev-parse", "HEAD"));
+  });
+
+  // The console's own call, not an env set by hand: spawnAgent runs cloneForAgent, and the sudo
+  // call runs this helper as this user (sudo's env_keep is the env the console gives it). The
+  // console has no CLAUDE_CONFIG_DIR of its own, as on a hosted server.
+  it("an agent on a repo starts: repo-clone passes with the env the console gives it, and the agent's spawn gets the same Claude folder", async () => {
+    mkdirSync(join(home, ".claude"));
+    for (const d of ["uploads", "settings"]) mkdirSync(join(homes, d), { mode: 0o750 });
+    const sudo: CloneRun = (_bin, args, o, cb) => {
+      const [, , , helper, ...rest] = args; // -n -u #uid helper verb ...
+      execFile(helper, rest, { env: { ...o.env, ...baseEnv() }, timeout: o.timeout, maxBuffer: o.maxBuffer, encoding: "buffer" }, (err, out, errOut) => cb(err, out, errOut));
+    };
+    const own = process.env.CLAUDE_CONFIG_DIR;
+    delete process.env.CLAUDE_CONFIG_DIR;
+    try {
+      vi.stubEnv("AGENT_HOME_ROOT", homes);
+      vi.stubEnv("CHIEF_ENABLED", "1");
+      vi.stubEnv("CHIEF_USER_AUTH", "log");
+      vi.stubEnv("CHIEF_CONSOLE_URL", "https://c.example");
+      vi.stubEnv("CHIEF_AGENT_UID", "4242");
+      vi.stubEnv("AGENT_CLAUDE_CONFIG_DIR", `${home}/.claude`);
+      setCloneExec({ sudo: "/usr/bin/sudo", helper: HELPER, uid: 4242 }, sudo);
+      setAgentHelper(true);
+      const spawned: { cwd: string; env?: Record<string, string> }[] = [];
+      const d = {
+        terminals: { spawn: (o: { cwd: string; env?: Record<string, string> }) => { spawned.push(o); }, kill: () => {} } as never,
+        store: new SessionStore(join(root, "store")), hub: new EventHub(), workspaceDir: ws, worktreeRoot: wt, port: 3100,
+      };
+      const r = await spawnAgent(d, { repo, prompt: "hi", runtime: "claude" });
+      if (!r.ok) throw new Error(`the spawn failed: ${r.error}`);
+      const dest = join(homes, "clones", r.id);
+      expect(g(dest, "rev-parse", "HEAD")).toBe(sha);
+      expect(g(dest, "rev-parse", "--abbrev-ref", "HEAD")).toBe(`agent/${r.id.slice(0, 8)}`);
+      // The trust key went into the agent's Claude folder: the one its spawn gets.
+      const trust = JSON.parse(readFileSync(join(home, ".claude", ".claude.json"), "utf8"));
+      expect(trust.projects[realpathSync(clones)].hasTrustDialogAccepted).toBe(true);
+      expect(spawned.map((o) => [o.cwd, o.env?.CLAUDE_CONFIG_DIR])).toEqual([[dest, `${home}/.claude`]]);
+    } finally {
+      if (own !== undefined) process.env.CLAUDE_CONFIG_DIR = own;
+      setCloneExec(null);
+      setAgentHelper(false);
+      vi.unstubAllEnvs();
+    }
   });
 
   it("repo-clone refuses a repo whose path has a character that the upload-pack command line cannot hold", async () => {

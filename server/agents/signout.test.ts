@@ -309,7 +309,7 @@ describe("sign out: basic protection", () => {
       terminals.spawn({ id: W });
       await writeFile(join(base, "fail"), "");
       const r = await signOut("default");
-      expect([r.statusCode, r.json()]).toMatchObject([502, { signedOut: false, why: "failed", stopped: 0 }]);
+      expect([r.statusCode, r.json()]).toMatchObject([500, { signedOut: false, why: "failed", stopped: 0 }]);
       expect(terminals.killed).toEqual([]);
       expect(isSignedOut("default")).toBe(false);
       expect(existsSync(credsOf("default"))).toBe(true);
@@ -333,7 +333,7 @@ describe("sign out: basic protection", () => {
     try {
       await writeFile(join(base, "keep"), "");
       const r = await b.signOut("default");
-      expect([r.statusCode, r.json()]).toMatchObject([502, { signedOut: false, why: "still-there" }]);
+      expect([r.statusCode, r.json()]).toMatchObject([500, { signedOut: false, why: "still-there" }]);
       expect(b.claude.calls()).toHaveLength(2);
       expect(isSignedOut("default")).toBe(false);
     } finally { await b.a.close(); }
@@ -441,7 +441,7 @@ describe("sign out: after it", () => {
       await agent("fleet-master", { kind: "fleet-master" });
       terminals.spawn({ id: W }); terminals.spawn({ id: "fleet-master" });
       const r = await signOut("default");
-      expect([r.statusCode, r.json()]).toMatchObject([502, { signedOut: false, why: "still-there", stopped: 2, waiting: [], restarted: ["fleet-master"] }]);
+      expect([r.statusCode, r.json()]).toMatchObject([500, { signedOut: false, why: "still-there", stopped: 2, waiting: [], restarted: ["fleet-master"] }]);
       expect(started).toEqual([["fleet-master"]]);
       expect(loginHold.waitsFor("fleet-master")).toBe(false);
     } finally { await a.close(); }
@@ -621,7 +621,7 @@ exec "${claude}" auth "\${@: -1}"
     const { a, terminals, signOut, agentDir } = await strongApp({ old: true });
     try {
       const r = await signOut("default");
-      expect([r.statusCode, r.json()]).toMatchObject([502, { signedOut: false, why: "old-helper", stopped: 0 }]);
+      expect([r.statusCode, r.json()]).toMatchObject([500, { signedOut: false, why: "old-helper", stopped: 0 }]);
       expect(terminals.killed).toEqual([]);
       expect(existsSync(join(agentDir, "in"))).toBe(true);
     } finally { await a.close(); }

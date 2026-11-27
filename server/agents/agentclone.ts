@@ -13,7 +13,7 @@
 // write) before each use, and refuses else.
 import { execFile } from "node:child_process";
 import { lstat, mkdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { isAgentId } from "../ids.js";
 import { agentHomeRoot } from "../chief/homes.js";
 import { runGit } from "./git.js";
@@ -118,11 +118,16 @@ function call(x: AgentExec, verb: "repo-clone" | "repo-remove" | "repo-read" | "
 }
 
 // The agent's clone of the console's repo `repo`, on `branch` at `sha` (a commit of the console's
-// repo). Returns the clone's folder.
-export async function cloneForAgent(x: AgentExec, f: CloneFolders, repo: string, id: string, branch: string, sha: string, o: { env?: Env; run?: Run } = {}): Promise<string> {
+// repo). Returns the clone's folder. `claudeDir` is the agent's CLAUDE_CONFIG_DIR, the value its
+// spawn gets (agentClaudeConfigDir): the helper's repo-clone refuses to run without it
+// (agent_claude) and writes the clone folder's trust key into that config. The console's own
+// CLAUDE_CONFIG_DIR, if any, never reaches the helper here.
+export async function cloneForAgent(x: AgentExec, f: CloneFolders, repo: string, id: string, branch: string, sha: string, claudeDir: string, o: { env?: Env; run?: Run } = {}): Promise<string> {
   if (!isAgentId(id)) throw new Error("invalid agent id");
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error("invalid start commit");
-  await call(x, "repo-clone", [repo, id, branch, sha], { timeoutMs: 600_000, maxBytes: 4096, ...o });
+  if (!isAbsolute(claudeDir)) throw new Error("the agent's CLAUDE_CONFIG_DIR is not an absolute path");
+  const env = { ...(o.env ?? process.env), CLAUDE_CONFIG_DIR: claudeDir };
+  await call(x, "repo-clone", [repo, id, branch, sha], { timeoutMs: 600_000, maxBytes: 4096, ...o, env });
   return clonePath(f, id);
 }
 

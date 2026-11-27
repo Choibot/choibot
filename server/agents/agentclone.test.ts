@@ -77,7 +77,8 @@ describe("the helper calls", () => {
     const seen: Seen[] = [];
     const f = cloneFolders(strongEnv())!;
     const sha = "a".repeat(40);
-    expect(await cloneForAgent(X, f, "/srv/w/repo", "a1", "agent/a1", sha, { run: fake(seen), env: { TELEGRAM_BOT_TOKEN: "t", LANG: "C.UTF-8" } })).toBe(join(homes, "clones", "a1"));
+    const claudeDir = join(homes, "agent", ".claude");
+    expect(await cloneForAgent(X, f, "/srv/w/repo", "a1", "agent/a1", sha, claudeDir, { run: fake(seen), env: { TELEGRAM_BOT_TOKEN: "t", LANG: "C.UTF-8", CLAUDE_CONFIG_DIR: "/home/console/.claude" } })).toBe(join(homes, "clones", "a1"));
     await removeClone(X, "a1", { run: fake(seen) });
     expect((await readAsAgent(X, "/srv/w/x", 10, { run: fake(seen, "0123456789") })).toString()).toBe("0123456789");
     expect(seen.map((s) => [s.bin, ...s.args])).toEqual([
@@ -85,14 +86,17 @@ describe("the helper calls", () => {
       ["/usr/bin/sudo", ...pre, "repo-remove", "a1"],
       ["/usr/bin/sudo", ...pre, "read-file", "/srv/w/x", "10"],
     ]);
-    expect(seen[0].env).toEqual({ LANG: "C.UTF-8" });
+    // The agent's config dir (the helper's agent_claude needs it), never the console's own.
+    expect(seen[0].env).toEqual({ LANG: "C.UTF-8", CLAUDE_CONFIG_DIR: claudeDir });
   });
 
   it("refuses an id or a sha of another shape before any call; the helper's reason line becomes the error", async () => {
     const seen: Seen[] = [];
     const f = cloneFolders(strongEnv())!;
-    await expect(cloneForAgent(X, f, "/r", "../x", "b", "a".repeat(40), { run: fake(seen) })).rejects.toThrow(/invalid agent id/);
-    await expect(cloneForAgent(X, f, "/r", "a1", "b", "HEAD", { run: fake(seen) })).rejects.toThrow(/invalid start commit/);
+    await expect(cloneForAgent(X, f, "/r", "../x", "b", "a".repeat(40), "/h/.claude", { run: fake(seen) })).rejects.toThrow(/invalid agent id/);
+    await expect(cloneForAgent(X, f, "/r", "a1", "b", "HEAD", "/h/.claude", { run: fake(seen) })).rejects.toThrow(/invalid start commit/);
+    await expect(cloneForAgent(X, f, "/r", "a1", "b", "a".repeat(40), "", { run: fake(seen) })).rejects.toThrow(/CLAUDE_CONFIG_DIR is not an absolute path/);
+    await expect(cloneForAgent(X, f, "/r", "a1", "b", "a".repeat(40), "rel/.claude", { run: fake(seen) })).rejects.toThrow(/CLAUDE_CONFIG_DIR is not an absolute path/);
     await expect(removeClone(X, "a/b", { run: fake(seen) })).rejects.toThrow(/invalid agent id/);
     expect(seen).toEqual([]);
     await expect(removeClone(X, "a1", { run: fake(seen, "", new Error("exit 2")) })).rejects.toThrow("choibot-agent-exec: agent id refused: x");
