@@ -21,6 +21,7 @@ import { homeRecordPatch, persistentHome, persistentHomeRoot, prepareHome, warnL
 import type { Env } from "../paths.js";
 import { AREA_RE, leadId, type AreaStore } from "./areas.js";
 import { leadLegacyHome } from "./prompt.js";
+import { leadDigestGap, leadQuiet, type LeadQuietDeps } from "./quiet.js";
 
 export { leadId };
 
@@ -180,6 +181,8 @@ export type LeadRuntimeDeps = {
   acted: { recent(id: string): boolean };
   terminals: ReplyTerminals;
   areas: Pick<AreaStore, "isLiveLead">;
+  // An active chief core (index.ts): the lead's quiet policy (quiet.ts). Absent: every event.
+  quiet?: LeadQuietDeps;
 };
 
 export type LeadRuntime = {
@@ -222,6 +225,7 @@ export function startLeadRuntime(d: LeadRuntimeDeps & { leadId: string; starting
       if (rec.spawnedBy !== id || isPersistentKind(rec.kind)) return false;
       try { return await d.areas.isLiveLead(id); } catch { return false; }
     },
+    ...(d.quiet ? { quiet: leadQuiet({ ...d.quiet, agents: d.agents }) } : {}),
   });
   const inbox: MasterInbox = new MasterInbox({
     hub: d.hub, events, tracker: new InputTracker(), agentId: id,
@@ -229,6 +233,7 @@ export function startLeadRuntime(d: LeadRuntimeDeps & { leadId: string; starting
     send: (text): Promise<boolean> => withTypingLock(id, async (): Promise<boolean> =>
       (inbox.blockedBy() ? false : typeIntoAgent(d.terminals, id, text))),
     ready: () => exists,
+    ...(d.quiet ? { digestGapMs: leadDigestGap(events) } : {}),
   });
   const unsubReady = d.hub.subscribe((e) => {
     if ((e.type === "agent-status" || e.type === "agent-hook") && e.agentId === id) {

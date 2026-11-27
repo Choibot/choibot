@@ -81,7 +81,7 @@ export function digestLine(e: FleetEvent): string {
   if (e.kind === "cron-ok") return `cron ${e.agentId} ok`;
   const pr = e.prUrl && PR_URL_RE.test(e.prUrl) ? ` ${e.prUrl}` : "";
   // The reason of a stop, in the line itself: no prompt of an agent names these two kinds.
-  const why = e.kind === "at-limit" ? " (its Claude login has no room, so its turn was cut. It did not end its work. The user can move it to another login; a new worker can name a login with \"account\")"
+  const why = e.kind === "at-limit" ? " (its Claude login has no room, so its turn was cut. It did not end its work. The user can move it to another login; a new worker can name a login with \"account\". The user has the console's usage-limit ticket for it: add no ticket for this block)"
     : e.kind === "model-error" ? " (the model of its session does not work for its Claude login, so its turn was cut. It did not end its work)"
     : e.kind === "login-out" ? " (its Claude login is signed out, so its turn was cut. It did not end its work. The user must sign in to that login again in Settings, or move the agent to another login)" : "";
   return `agent-${e.agentId.slice(0, 8)} ${e.repo} ${e.kind}${pr}${why}`;
@@ -113,6 +113,10 @@ export function requeueDigest(items: QueueItem[], events: Pick<EventQueue, "addQ
 }
 
 const STATUS_KIND: Partial<Record<string, FleetEventKind>> = { idle: "waiting", error: "errored", done: "finished" };
+// The failures that must not wait for a digest gap (a lead's inbox reads hasAlert()).
+const ALERT_KINDS: ReadonlySet<FleetEventKind> = new Set<FleetEventKind>(["errored", "at-limit", "model-error", "login-out", "service-crashed", "lead-errored"]);
+// The status a held line waits in: any other status ends the wait.
+const heldStatus = (ev: FleetEvent): string => (ev.kind === "finished" ? "done" : "idle");
 
 export class EventQueue {
   // Insertion-ordered: the first key is the oldest event.
@@ -161,8 +165,9 @@ export class EventQueue {
     if (e.type === "agent-status") {
       if (this.lastStatus.get(e.agentId) === e.status) return;
       this.lastStatus.set(e.agentId, e.status);
-      // The agent runs again, ended or failed: its wait is over.
-      if (e.status !== "idle") this.held.delete(e.agentId);
+      // The agent runs again, ended or failed: its wait is over (a held `finished`: it runs again).
+      const h = this.held.get(e.agentId);
+      if (h && e.status !== heldStatus(h.ev)) this.held.delete(e.agentId);
       // Ended on purpose by the console (a sign-out of its login): no "finished" line.
       if (e.quiet) return;
       const kind = STATUS_KIND[e.status];
@@ -172,7 +177,7 @@ export class EventQueue {
       await this.addFor(e.agentId, e.why === "limit" ? "at-limit" : e.why === "login" ? "login-out" : "model-error", undefined, true);
     } else if (e.type === "issue") {
       await this.onIssue(e.issue);
-    } else if (e.type === "service-status" && this.d.quiet && e.status === "crashed") {
+    } else if (e.type === "service-status" && this.d.quiet && !this.d.quiet.lead && e.status === "crashed") {
       // `crashed` is a crash with no restart left (no auto-restart, or its
       // breaker tripped): a service problem the user must know about.
       if (REPO_RE.test(e.serviceId)) this.add({ agentId: e.serviceId, repo: "", kind: "service-crashed" });
@@ -222,27 +227,37 @@ export class EventQueue {
     // its `pr` queue item (relayQueueAdd adds the line itself when that item
     // could not be made). `waiting` is held: digest() releases it once the
     // agent is blocked. A second waiting of a held agent keeps the first time.
-    if (kind === "waiting" && !this.held.has(agentId)) this.held.set(agentId, { ev, since: this.now() });
+    // A lead's queue holds a `finished` the same way: it is a line only when unexplained.
+    const holds = kind === "waiting" || (kind === "finished" && this.d.quiet.lead !== undefined);
+    if (holds && !this.held.has(agentId)) this.held.set(agentId, { ev, since: this.now() });
   }
 
   // Quiet policy: what a held waiting is now. `over`: the agent's last status
   // is not idle (its running event overtook the record load of its idle
   // event). `due`: blocked for BLOCKED_ALERT_MS, and the user did not type to
   // the agent within the presence window — an alert.
-  private heldState(agentId: string, since: number): "over" | "due" | "held" {
+  private heldState(agentId: string, h: { ev: FleetEvent; since: number }): "over" | "due" | "held" {
     const st = this.lastStatus.get(agentId);
-    if (st !== undefined && st !== "idle") return "over";
+    if (st !== undefined && st !== heldStatus(h.ev)) return "over";
     const blockedMs = this.d.quiet?.blockedMs ?? BLOCKED_ALERT_MS;
-    return this.now() - since >= blockedMs && !this.d.quiet?.userPresent(agentId) ? "due" : "held";
+    return this.now() - h.since >= blockedMs && !this.d.quiet?.userPresent(agentId) ? "due" : "held";
   }
 
-  // Moves the due waitings into the digest and forgets the ones that are over.
-  // A due waiting first gets one record read: an agent deleted with no status
-  // event (it had no live PTY) is not waiting. The line then goes in the next
-  // digest() (the inbox asks every second). A read that fails passes the line.
+  // A due held line passes when the agent still exists (one deleted with no status event had
+  // no live PTY) and, in a lead's queue, its wait is not explained. A read that fails passes.
+  private async heldPasses(agentId: string): Promise<boolean> {
+    const rec = await this.d.agents.load(agentId).catch(() => undefined);
+    if (rec === null) return false;
+    const lead = this.d.quiet?.lead;
+    return !lead || !(await lead.explained(agentId).catch(() => false));
+  }
+
+  // Moves the due held lines into the digest and forgets the ones that are over.
+  // A due line first gets its check (heldPasses); the line then goes in the next
+  // digest() (the inbox asks every second).
   private releaseHeld(): void {
     for (const [agentId, h] of this.held) {
-      const state = this.heldState(agentId, h.since);
+      const state = this.heldState(agentId, h);
       if (state === "held") continue;
       if (state === "over") {
         this.held.delete(agentId);
@@ -251,17 +266,22 @@ export class EventQueue {
         this.add(h.ev);
       } else if (h.checked === undefined) {
         h.checked = "pending";
-        const settle = (exists: boolean): void => {
+        const settle = (pass: boolean): void => {
           if (this.held.get(agentId) !== h) return;
-          if (exists) h.checked = "ok"; else this.held.delete(agentId);
+          if (pass) h.checked = "ok"; else this.held.delete(agentId);
         };
-        void this.d.agents.load(agentId).then((rec) => settle(rec !== null), () => settle(true));
+        void this.heldPasses(agentId).then(settle, () => settle(true));
       }
     }
   }
 
   // The agents whose waiting is held (not yet an alert): for tests and the status line.
   heldCount(): number { return this.held.size; }
+  // A failure line waits: a lead's inbox then sends at once, not after its digest gap.
+  hasAlert(): boolean {
+    for (const ev of this.items.values()) if (ALERT_KINDS.has(ev.kind)) return true;
+    return false;
+  }
 
   add(ev: FleetEvent): void {
     const key = `${ev.agentId}:${ev.kind}`;
@@ -330,7 +350,7 @@ export class EventQueue {
   // digest(), and a held line is not news yet.
   size(): number {
     let due = 0;
-    for (const [agentId, h] of this.held) if (this.heldState(agentId, h.since) === "due") due++;
+    for (const [agentId, h] of this.held) if (this.heldState(agentId, h) === "due") due++;
     return this.items.size + this.queueItems.size + due;
   }
 

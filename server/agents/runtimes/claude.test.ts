@@ -47,7 +47,11 @@ describe("claude prepare: the hook settings write", () => {
   }
   // Hardened deployment with the helper probe passed (agent uid spawns).
   const hardened = () => { for (const [k, v] of Object.entries(HARDENED)) vi.stubEnv(k, v); setAgentHelper(true); };
-  const want = (r: AgentRecord) => JSON.stringify(buildHookSettings({ agentId: r.id, token: r.hookToken, port: 3999 }));
+  // The hooks and the compact window of the kind (compact.ts): a master 300000, a worker 200000.
+  const want = (r: AgentRecord) => JSON.stringify({
+    ...buildHookSettings({ agentId: r.id, token: r.hookToken, port: 3999 }),
+    env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: r.kind === "fleet-master" ? "300000" : "200000" },
+  });
   const ctx = { port: 3999, workspaceDir: "/ws-unused" };
 
   for (const [what, make] of [
@@ -86,7 +90,16 @@ describe("claude prepare: the hook settings write", () => {
     });
   }
 
-  it("not hardened: the same settings file as before", async () => {
+  it("AGENT_COMPACT_WINDOW=off: the hooks only, as before", async () => {
+    const dir = await tmp("agent-dir-");
+    vi.stubEnv("AGENT_COMPACT_WINDOW", "off");
+    const r = rec({ id: "w1", repo: "/ws/app", worktree: dir, cwd: dir });
+    await claudeRuntime.prepare(r, ctx);
+    expect(await readFile(join(dir, ".choibot-hooks.json"), "utf8"))
+      .toBe(JSON.stringify(buildHookSettings({ agentId: r.id, token: r.hookToken, port: 3999 })));
+  });
+
+  it("not hardened: the hooks and the compact window", async () => {
     const dir = await tmp("agent-dir-");
     await mkdir(dir, { recursive: true });
     const r = rec({ id: "w1", repo: "/ws/app", worktree: dir, cwd: dir });

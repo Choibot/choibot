@@ -24,10 +24,12 @@ import type { DecisionLog, Rule, RuleStore } from "./brain/store.js";
 import { proposalCardText, proposalKeyboard, ruleCardKeyboard, ruleCardText, sha256Hex, type CardIndex } from "./cards.js";
 import { oneLine } from "../text.js";
 import type { DeployService } from "./deploy/service.js";
+import type { LimitTicket } from "./limit/service.js";
 import { onChain } from "./files.js";
 import type { ChiefPaths } from "./paths.js";
 import type { ActionResult, QueueActions } from "./queue/actions.js";
 import { parseItemCallback, QUEUE_GLYPH, type ItemCallback } from "./queue/cards.js";
+import { LIMIT_ALL } from "./limit/ticket.js";
 import { sortOpen } from "./queue/priority.js";
 import type { QueueStore } from "./queue/store.js";
 import type { QueueItem } from "./queue/types.js";
@@ -88,6 +90,8 @@ export type ChiefTgDeps = {
   queueStore?: Pick<QueueStore, "get" | "withItem" | "write">;
   // The deploy ticket's Deploy button (spec §5.7). Without it a `q:y` tap does nothing.
   deploy?: Pick<DeployService, "startFromCard">;
+  // The usage-limit ticket's buttons (limit/service.ts); absent: its taps do nothing.
+  limit?: Pick<LimitTicket, "press">;
 };
 
 const QUEUE_LINE_MAX = 200;
@@ -359,6 +363,19 @@ export class ChiefTelegram {
         if (!deploy) return;
         const s = await deploy.startFromCard(id);
         r = s.code === 200 ? { code: 200, item: s.item } : { code: 409, body: { error: s.error, reason: "deploy" } };
+        break;
+      }
+      // The usage-limit ticket: routeCallback let only the user's own Telegram account come here.
+      // The service checks the ticket, the row and the login again now. The card edits itself (the
+      // rows' states); a press of "all" also says how many it took.
+      case "l": {
+        const limit = this.d.limit;
+        if (!limit || !cb.limit) return;
+        const s = await limit.press(id, cb.limit);
+        if (s.code === 200) {
+          r = { code: 200, item: s.item };
+          if (cb.limit.row === LIMIT_ALL) this.run("limit reply", () => this.replyTo(cardId, s.text));
+        } else r = { code: s.code, body: { error: s.error, reason: "limit" } };
         break;
       }
     }

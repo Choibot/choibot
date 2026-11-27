@@ -252,7 +252,7 @@ describe("LeadRuntimes", () => {
     hub.subscribe = (fn) => { subs++; return subscribe(fn); };
     return { hub, subs: () => subs };
   }
-  function runtimesOn(hub: EventHub, writes: string[] = []) {
+  function runtimesOn(hub: EventHub, writes: string[] = [], quiet?: ConstructorParameters<typeof LeadRuntimes>[0]["quiet"]) {
     const terminals = {
       has: () => true, hasSession: async () => true, reattach: async () => ({}),
       write: (_id: string, d: string) => { writes.push(d); }, inputReady: () => true,
@@ -260,8 +260,26 @@ describe("LeadRuntimes", () => {
     const areas = new AreaStore("/nonexistent/areas.json", { exists: async () => true });
     return new LeadRuntimes({
       hub, agents: { load: async () => null }, issues: { list: async () => [] }, acted: { recent: () => false }, terminals, areas,
+      ...(quiet ? { quiet } : {}),
     });
   }
+
+  it("with the quiet deps (an active core), a failure line skips the digest gap; without them it waits", async () => {
+    for (const withQuiet of [true, false]) {
+      const hub = new EventHub();
+      const writes: string[] = [];
+      const quiet = { userPresent: () => false, queue: { list: async () => [] }, workspaceDir: "/nonexistent" };
+      const r = runtimesOn(hub, writes, withQuiet ? quiet : undefined);
+      const rt = r.ensure(LEAD, { starting: false, recordExists: true });
+      rt.events.addQueueLine("qaaaaaaaa", "pr", "app-shop");
+      await rt.inbox.tick();
+      hub.emitEvent({ type: "agent-hook", agentId: LEAD, event: "Stop" });
+      rt.events.add({ agentId: W, repo: "app-shop", kind: "errored" });
+      await rt.inbox.tick();
+      expect(writes.join("").includes("errored")).toBe(withQuiet);
+      r.stopAll();
+    }
+  });
 
   it("ensure twice: one runtime and one set of hub subscriptions", async () => {
     const { hub, subs } = counting();

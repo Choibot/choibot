@@ -48,7 +48,13 @@ describe("choibot agents list", () => {
       kind: "worker", prUrl: REC.prUrl, prNumber: 42, sessionId: "s-1", cwd: REC.worktree, createdAt: 5,
     });
     expect(rows[1]).toMatchObject({ id: "w1", repo: "", cwd: "/ws" });
+    expect("model" in rows[0]).toBe(false);
     expect(w.out.join("")).not.toContain("secret");
+  });
+  it("prints a worker's own model", async () => {
+    const w = world({ "GET /api/agents": () => ({ body: { sessions: [{ ...REC, model: "haiku" }] } }) });
+    await runAgents("list", [], w.deps);
+    expect(JSON.parse(w.out.join(""))[0].model).toBe("haiku");
     expect(w.calls[0].path).toBe("/api/agents");
   });
 
@@ -93,6 +99,17 @@ describe("choibot agents spawn with a Claude login", () => {
     const w = world(routes(() => ({ status: 202, body: { id: "new-1" } })), JSON.stringify({ repo: "app-shop", prompt: "fix it" }));
     await runAgents("spawn", [], w.deps);
     expect(w.calls[1].body).toEqual({ repo: "/ws/app-shop", prompt: "fix it" });
+  });
+  it("passes \"model\"; the console checks the name; a value that is not text is refused before any call", async () => {
+    const w = world(routes(() => ({ status: 202, body: { id: "new-1" } })), JSON.stringify({ repo: "app-shop", prompt: "fix it", model: " sonnet " }));
+    expect(await runAgents("spawn", [], w.deps)).toBe(0);
+    expect(w.calls[1].body).toEqual({ repo: "/ws/app-shop", prompt: "fix it", model: "sonnet" });
+    const refused = world(routes(() => ({ status: 400, body: { error: "model must be one of fable, opus, sonnet, haiku" } })), JSON.stringify({ repo: "app-shop", prompt: "fix it", model: "gpt" }));
+    expect(await runAgents("spawn", [], refused.deps)).toBe(1);
+    expect(refused.err.join("\n")).toContain("model must be one of fable, opus, sonnet, haiku");
+    const bad = world(routes(() => ({ status: 202, body: {} })), JSON.stringify({ repo: "app-shop", prompt: "fix it", model: 7 }));
+    expect(await runAgents("spawn", [], bad.deps)).toBe(1);
+    expect(bad.calls).toEqual([]);
   });
   it("an id that is not a login is refused with the list of the ids; a value that is not text is refused before any call", async () => {
     const w = world(routes(() => ({ status: 400, body: { error: "unknown account: ghost. The logins are: default, login-2" } })), JSON.stringify({ repo: "app-shop", prompt: "fix it", account: "ghost" }));

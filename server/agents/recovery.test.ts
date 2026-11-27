@@ -488,3 +488,36 @@ describe("switchAccount", () => {
     expect(patches).toEqual([{ account: "work" }]);
   });
 });
+
+// The model of a start (agents/model.ts startModel): a worker moves to the setting at its next
+// resume; a lead that resumes its session keeps the model it was saved on.
+describe("resumeAgent model", () => {
+  afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
+  const modelOf = (a: string[]): string | null => (a.includes("--model") ? a[a.indexOf("--model") + 1] : null);
+  const SID = "11111111-1111-4111-8111-111111111111";
+
+  it("a worker: its own model, else the setting, fresh or on a resume of its session", async () => {
+    vi.stubEnv("AGENT_MODEL", "sonnet");
+    for (const resumes of [false, true]) {
+      vi.spyOn(claudeRuntime, "canResume").mockResolvedValue(resumes);
+      const own = rec({ id: "m1", model: "fable", sessionId: SID });
+      const none = rec({ id: "m2", sessionId: SID });
+      const t = fakeCtx([own, none]);
+      await resumeAgent(own, t.ctx);
+      await resumeAgent(none, t.ctx);
+      expect(t.spawned.map((x) => modelOf(x.args))).toEqual(["fable", "sonnet"]);
+      expect(t.spawned[1].args.includes("--resume")).toBe(resumes);
+    }
+  });
+
+  it("a lead: no flag when it resumes its session (it keeps its model); the setting on a fresh start", async () => {
+    vi.stubEnv("AGENT_MODEL", "haiku");
+    for (const [resumes, want] of [[true, null], [false, "haiku"]] as const) {
+      vi.spyOn(claudeRuntime, "canResume").mockResolvedValue(resumes);
+      const lead = rec({ id: "lead-app", kind: "lead", sessionId: SID });
+      const t = fakeCtx([lead]);
+      await resumeAgent(lead, t.ctx);
+      expect(modelOf(t.spawned[0].args)).toBe(want);
+    }
+  });
+});

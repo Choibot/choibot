@@ -14,6 +14,12 @@ export function goOnText(loginName: string, signedOut = false): string {
   return `${CONSOLE_MARK}Moved to ${name}. The agent goes on.${FOR_AGENT}the Claude login that you used was ${signedOut ? "signed out" : "at its limit"}, so your last turn was cut. You are on another login now. Go on with the work that you were doing, from where it stopped. Do not start it again from zero.)`;
 }
 
+// Continue on the usage-limit ticket (chief/limit): the agent's own login has room again. The line
+// never starts with "usage limit reached": that would read as a new stop (stopwhy.ts).
+export function continueText(): string {
+  return `${CONSOLE_MARK}The login has room again. The agent goes on.${FOR_AGENT}your last turn was cut by the usage limit of your Claude login. It has room now. Go on with the work that you were doing, from where it stopped. Do not start it again from zero.)`;
+}
+
 // What the thread shows for a line of the console: the part that is for the person.
 export function consoleNote(text: string): string | null {
   if (!text.startsWith(CONSOLE_MARK)) return null;

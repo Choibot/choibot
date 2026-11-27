@@ -4,10 +4,14 @@
 import { clip, TG_TEXT_MAX, type InlineButton, type InlineKeyboard } from "../../issues/telegram.js";
 import { isPersistentAgentId } from "../kinds.js";
 import { CONSOLE_AGENT_ID, DEPLOY_CLOSED, isRunning, ticketLine, updateVersions } from "../deploy/ticket.js";
+import {
+  LIMIT_ALL, LIMIT_CARD_ROWS, LIMIT_TAG_RE, LIMIT_WORDS, rowCanContinue, rowCanMove, rowStateText,
+  type LimitPress,
+} from "../limit/ticket.js";
 import { COORDINATOR_ID } from "../../coordinator/paths.js";
 import { hasImages, type QueueItem } from "./types.js";
 
-export const QUEUE_GLYPH: Record<QueueItem["kind"], string> = { choice: "▸", pr: "⇄", preview: "▣", question: "?", deploy: "⟳" };
+export const QUEUE_GLYPH: Record<QueueItem["kind"], string> = { choice: "▸", pr: "⇄", preview: "▣", question: "?", deploy: "⟳", limit: "◷" };
 
 const flat = (s: string): string => s.replace(/[\r\n\u2028\u2029\u0085]+/g, " ");
 // A line of agent text that starts (after blanks or invisible format
@@ -28,7 +32,7 @@ function cardAge(ms: number): string {
 const recommended = (item: QueueItem): QueueItem["recommend"] =>
   isPersistentAgentId(item.agentId) ? undefined : item.recommend;
 
-type TextOpts = { now: number; ruleText?: (id: string) => string | undefined; consoleUrl?: string };
+type TextOpts = { now: number; ruleText?: (id: string) => string | undefined; consoleUrl?: string; tz?: string };
 
 type Parts = { head: string; body: string; note: string; star: string };
 
@@ -67,6 +71,20 @@ function deployNote(item: QueueItem): string {
   return [run?.phase === "running" ? "" : d.note ?? "", versions, ticketLine(d), tail].filter(Boolean).join("\n");
 }
 
+// The usage-limit ticket (chief/limit): one numbered line for each blocked agent (the buttons
+// carry the same number), at most LIMIT_CARD_ROWS, then how many more. A login shows by its name
+// on the page (never an e-mail address). A time says its zone ("Back at 14:00 UTC"): no card has
+// the user's own zone, and the server's zone can be another one.
+const NAME_MAX = 40;
+function limitNote(item: QueueItem, o: TextOpts): string {
+  const rows = item.kind === "limit" ? item.limit?.rows ?? [] : [];
+  if (rows.length === 0) return "";
+  const shown = rows.slice(0, LIMIT_CARD_ROWS).map((r, i) =>
+    `${i + 1}. ${clip(flat(r.name), NAME_MAX)} · ${clip(flat(r.loginName), NAME_MAX)} · ${rowStateText(r, (ms) => hhmm(ms, o.tz, true))}`);
+  const more = rows.length - shown.length;
+  return [...shown, ...(more > 0 ? [`+${more} more — open the Queue`] : [])].join("\n");
+}
+
 function parts(item: QueueItem, o: TextOpts): Parts {
   // The console's own items (the deploy ticket, a rule suggestion) have no agent: the head names none.
   const who = item.agentId === CONSOLE_AGENT_ID ? "" : item.agentId === COORDINATOR_ID ? " · Coordinator" : ` · agent-${item.agentId.slice(0, 8)}`;
@@ -83,7 +101,7 @@ function parts(item: QueueItem, o: TextOpts): Parts {
       ? `★ ${by} suggests ${flat(rec.value)} — rule ${ids.join(", ")}${text !== undefined ? `: "${flat(text)}"` : ""}`
       : `★ ${by} suggests ${flat(rec.value)} — ${flat(rec.why)}`;
   }
-  const note = [[waitNote(item), mediaNote(item)].filter(Boolean).join(" · ") || deployNote(item), pageNote(item, o.consoleUrl)].filter(Boolean).join("\n");
+  const note = [[waitNote(item), mediaNote(item)].filter(Boolean).join(" · ") || deployNote(item) || limitNote(item, o), pageNote(item, o.consoleUrl)].filter(Boolean).join("\n");
   return { head, body: unmark(item.body), note, star };
 }
 
@@ -99,8 +117,8 @@ export function queueCardText(item: QueueItem, o: TextOpts): string {
   return assemble(parts(item, o));
 }
 
-function hhmm(at: number, tz?: string): string {
-  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: tz }).format(at);
+function hhmm(at: number, tz?: string, zone = false): string {
+  return new Intl.DateTimeFormat("en-GB", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: tz, ...(zone ? { timeZoneName: "short" as const } : {}) }).format(at);
 }
 
 // What the card shows for an answer value: a choice option key as is; the words
@@ -124,6 +142,8 @@ export function answeredCardText(item: QueueItem, o: TextOpts & { tz?: string })
     if (item.lastError === DEPLOY_CLOSED.updated) return assemble(p, "\n✓ updated");
     if (item.lastError === DEPLOY_CLOSED.updateFailed) return assemble(p, "\n× update failed");
   }
+  // A closed usage-limit ticket: its rows are old, so the card shows the close only.
+  if (item.kind === "limit" && item.status === "withdrawn") return assemble({ ...p, note: "" }, `\n${item.lastError ? flat(item.lastError) : "withdrawn"}`);
   if (item.status === "withdrawn") return assemble(p, `\n${item.lastError ? flat(item.lastError) : "withdrawn"}`);
   const a = item.answer;
   if (!a) return assemble(p);
@@ -174,9 +194,33 @@ export function queueCardKeyboard(item: QueueItem, consoleUrl: string): InlineKe
       if (isRunning(item.deploy)) return { inline_keyboard: [] };
       rows.push([cb(item.deploy?.release ? "Update" : "Deploy", `q:y:${id}`)]);
       break;
+    case "limit": return { inline_keyboard: limitKeyboard(item) };
   }
   rows.push([cb("Snooze 1h", `q:s:${id}`)]);
   return { inline_keyboard: rows };
+}
+
+// The buttons of the usage-limit ticket: for each row on the card, its number with Move and
+// Continue, two in a line; then Move all and Continue all when two rows or more can take them.
+// No Snooze: the ticket closes by itself when no agent is blocked. Each press is checked again
+// at the server (limit/service.ts press).
+function limitKeyboard(item: QueueItem): InlineButton[][] {
+  const id = item.id;
+  const info = item.limit;
+  if (!info) return [];
+  const to = info.to;
+  const out: InlineButton[] = [];
+  info.rows.slice(0, LIMIT_CARD_ROWS).forEach((r, i) => {
+    if (rowCanMove(r, to)) out.push(cb(clip(`${i + 1} · ${LIMIT_WORDS.move(flat(to.name))}`, BTN_MAX), `q:l:${id}:m:${r.tag}:${to.id}`));
+    if (rowCanContinue(r)) out.push(cb(`${i + 1} · ${LIMIT_WORDS.continue}`, `q:l:${id}:c:${r.tag}`));
+  });
+  const rows: InlineButton[][] = [];
+  for (let i = 0; i < out.length; i += 2) rows.push(out.slice(i, i + 2));
+  const all: InlineButton[] = [];
+  if (to && info.rows.filter((r) => rowCanMove(r, to)).length > 1) all.push(cb(clip(LIMIT_WORDS.moveAll(flat(to.name)), BTN_MAX), `q:l:${id}:M:${to.id}`));
+  if (info.rows.filter(rowCanContinue).length > 1) all.push(cb(LIMIT_WORDS.continueAll, `q:l:${id}:C`));
+  if (all.length) rows.push(all);
+  return rows;
 }
 
 export function autoLineText(item: QueueItem): string {
@@ -188,13 +232,19 @@ export function autoKeyboard(item: QueueItem): InlineKeyboard {
   return { inline_keyboard: [[cb("Undo", `q:u:${item.id}:${item.answerSeq}`)]] };
 }
 
-// `y`: Deploy, on the console's own deploy ticket only (spec §5.7).
-export type ItemCallback = { action: "a" | "c" | "o" | "r" | "s" | "u" | "x" | "y"; itemId: string; idx?: number; seq?: number };
+// `y`: Deploy, on the console's own deploy ticket only (spec §5.7). `l`: a button of the
+// usage-limit ticket, with its press (chief/limit).
+export type ItemCallback = { action: "a" | "c" | "o" | "r" | "s" | "u" | "x" | "y" | "l"; itemId: string; idx?: number; seq?: number; limit?: LimitPress };
 
 const NUM = "(0|[1-9]\\d{0,5})";
 const PLAIN = /^q:([acrsxy]):(q[0-9a-z]{8})$/;
 const OPTION = new RegExp(`^q:o:(q[0-9a-z]{8}):${NUM}$`);
 const UNDO = new RegExp(`^q:u:(q[0-9a-z]{8}):${NUM}$`);
+// q:l:<item>:m:<tag>:<login>  Move one     q:l:<item>:M:<login>  Move all
+// q:l:<item>:c:<tag>          Continue one q:l:<item>:C          Continue all
+// A login id as accounts.ts allows it (at most 32 characters): at most 57 bytes in all.
+const LOGIN = "([a-z0-9][a-z0-9_-]{0,31})";
+const LIMIT_CB = new RegExp(`^q:l:(q[0-9a-z]{8}):(?:m:([0-9a-f]{8}):${LOGIN}|c:([0-9a-f]{8})|M:${LOGIN}|(C))$`);
 
 export function parseItemCallback(data: string | undefined): ItemCallback | null {
   if (!data) return null;
@@ -202,6 +252,14 @@ export function parseItemCallback(data: string | undefined): ItemCallback | null
   if (m) return { action: m[1] as ItemCallback["action"], itemId: m[2] };
   if ((m = OPTION.exec(data))) return { action: "o", itemId: m[1], idx: Number(m[2]) };
   if ((m = UNDO.exec(data))) return { action: "u", itemId: m[1], seq: Number(m[2]) };
+  if ((m = LIMIT_CB.exec(data))) {
+    const press: LimitPress = m[2] ? { row: m[2], act: "move", to: m[3] }
+      : m[4] ? { row: m[4], act: "continue" }
+      : m[5] ? { row: LIMIT_ALL, act: "move", to: m[5] }
+      : { row: LIMIT_ALL, act: "continue" };
+    if (press.row !== LIMIT_ALL && !LIMIT_TAG_RE.test(press.row)) return null;
+    return { action: "l", itemId: m[1], limit: press };
+  }
   return null;
 }
 

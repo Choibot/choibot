@@ -60,6 +60,8 @@ export type InboxDeps = {
   waits?: () => boolean;
   // The agent this inbox feeds; default the fleet master (a lead's inbox passes its own id).
   agentId?: string;
+  // The time between two digests; default DIGEST_GAP_MS (a lead's: chief/leads/quiet.ts).
+  digestGapMs?: () => number;
   onQueued?: (reason: "busy" | "draft") => void;
   now?: () => number;
 };
@@ -315,7 +317,7 @@ export class MasterInbox {
         const fresh = batch.find((m) => m.firstPush);
         if (fresh?.surface) this.surface = fresh.surface;
       } else {
-        if (this.now() - this.lastDigestAt < DIGEST_GAP_MS) return;
+        if (this.now() - this.lastDigestAt < (this.d.digestGapMs?.() ?? DIGEST_GAP_MS)) return;
         const text = this.d.events.digest();
         if (!text) return;
         if (!(await this.d.send(text))) return;

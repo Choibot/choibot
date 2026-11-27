@@ -13,7 +13,7 @@ import { envRead } from "../../server/names.mjs";
 const HELP = `${CLI_NAME} agents — console agents (local console API)
 
   list                       console agents as JSON
-  spawn                      start an agent; JSON on stdin: {"repo":"<name>","prompt":"…","base":"<branch>"?,"account":"<login id>"?}
+  spawn                      start an agent; JSON on stdin: {"repo":"<name>","prompt":"…","base":"<branch>"?,"account":"<login id>"?,"model":"fable|opus|sonnet|haiku"?}
   stop <id>                  stop an agent
   resume <id>                resume an agent
   close <id>                 a lead only (chief on): close a worker it spawned whose task is done
@@ -55,7 +55,7 @@ export type AgentsDeps = {
 type ApiAgent = {
   id: string; label: string; repo: string; worktree: string; cwd?: string; branch: string;
   status: string; kind?: string; prUrl?: string; prNumber?: number; sessionId: string | null; createdAt: number;
-  spawnedBy?: string; closedAt?: number;
+  spawnedBy?: string; closedAt?: number; model?: string;
 };
 
 function defaultDeps(): AgentsDeps {
@@ -78,7 +78,7 @@ function view(r: ApiAgent, chief: boolean) {
   return {
     id: r.id, label: r.label, repo: r.repo ? basename(r.repo) : "", branch: r.branch, status: r.status,
     kind: r.kind ?? "worker", prUrl: r.prUrl, prNumber: r.prNumber, sessionId: r.sessionId,
-    cwd: r.cwd ?? r.worktree, createdAt: r.createdAt,
+    cwd: r.cwd ?? r.worktree, createdAt: r.createdAt, ...(r.model ? { model: r.model } : {}),
     ...(chief ? { spawnedBy: r.spawnedBy, closedAt: r.closedAt } : {}),
   };
 }
@@ -108,7 +108,7 @@ export async function runAgents(sub: string | undefined, rest: string[], overrid
         return 0;
       }
       case "spawn": {
-        let spec: { repo?: unknown; prompt?: unknown; base?: unknown; account?: unknown };
+        let spec: { repo?: unknown; prompt?: unknown; base?: unknown; account?: unknown; model?: unknown };
         if (d.stdinIsTTY) throw new CliError("spawn reads JSON on stdin");
         try { spec = JSON.parse(await d.readStdin()); }
         catch (e) { throw new CliError(`invalid JSON on stdin: ${msg(e)}`); }
@@ -119,12 +119,15 @@ export async function runAgents(sub: string | undefined, rest: string[], overrid
         // one with room when the default one is at its limit. An id that is not a login is
         // refused by the console, with the list of the ids.
         if (spec.account !== undefined && (typeof spec.account !== "string" || !spec.account.trim())) throw new CliError("spawn: \"account\" must be the id of a Claude login");
+        // The model of the new agent; none = its login's default. The console checks the name.
+        if (spec.model !== undefined && (typeof spec.model !== "string" || !spec.model.trim())) throw new CliError("spawn: \"model\" must be fable, opus, sonnet or haiku");
         const { repos } = (await call("GET", "/api/repos")) as { repos: { name: string; path: string }[] };
         const match = repos.find((r) => r.name === (spec.repo as string).trim());
         if (!match) throw new CliError(`unknown repo: ${spec.repo}`);
         print(await call("POST", "/api/agents", {
           repo: match.path, prompt: spec.prompt, ...(spec.base ? { baseBranch: spec.base } : {}),
           ...(typeof spec.account === "string" ? { account: spec.account.trim() } : {}),
+          ...(typeof spec.model === "string" ? { model: spec.model.trim() } : {}),
         }));
         return 0;
       }

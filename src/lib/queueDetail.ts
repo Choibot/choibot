@@ -18,6 +18,9 @@ export function detailActions(i: QueueItem, readOnly: boolean): DetailAction[] {
   // The console's own deploy ticket (chief spec §5.7): no answer. Its Deploy button is its own
   // control (DeployPanel); here it can only be put aside.
   if (i.kind === "deploy") return [{ id: "snooze", label: "Snooze 1 h", key: "s" }, { id: "withdraw", label: "Withdraw" }];
+  // The usage-limit ticket: its rows' buttons are its own (LimitPanel); it has no snooze (the
+  // agents wait now). Withdraw dismisses it until a new block comes.
+  if (i.kind === "limit") return [{ id: "withdraw", label: "Withdraw" }];
   if (i.kind === "pr" || i.kind === "preview") {
     if (i.kind === "preview") out.push({ id: "approve", label: "Looks good", key: "a" });
     out.push({ id: "changes", label: "Request changes", key: "c" });

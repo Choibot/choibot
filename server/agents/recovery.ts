@@ -1,6 +1,7 @@
 // server/agents/recovery.ts
 // Self-healing agent recovery: resume/reconcile dead agents (restoring their
 // full conversation via the runtime's resume path when the transcript survives).
+import { startModel } from "./model.js";
 import { isPersistentKind, type AgentRecord, type SessionStore } from "./store.js";
 import type { TerminalManager } from "./terminal.js";
 import { pick } from "./runtimes/index.js";
@@ -175,8 +176,11 @@ export async function resumeAgent(
   }
 
   const canResume = await runtime.canResume(rec, cwd);
+  // The model (model.ts startModel), also on a resume: a resumed session keeps the model it was
+  // saved on unless --model says another (code.claude.com/docs/en/model-config).
+  const model = runtime.id === "claude" && !preset.model ? startModel(rec, { fresh: !canResume }) : undefined;
   const args = runtime.buildArgs(
-    preset,
+    model ? { ...preset, model } : preset,
     { settingsPath, resume: canResume ? rec.sessionId! : undefined, cwd, prompt: opts.prompt, promptSnapshotOff: chief },
   );
   ctx.terminals.spawn({ id: rec.id, cwd, args, command: runtime.bin(), env, persist: true });

@@ -95,7 +95,7 @@ export function whereParts(i: Pick<QueueItem, "repo" | "area">, hasLead: boolean
 
 // The second line of a row: kind · (area) · repo · facts · age. `warn` parts show in amber.
 export function rowMeta(i: QueueItem, now: number, hasLead = false): MetaPart[] {
-  const out: MetaPart[] = [{ text: i.kind === "deploy" && i.deploy?.release ? "update" : i.kind }, ...whereParts(i, hasLead)];
+  const out: MetaPart[] = [{ text: i.kind === "deploy" && i.deploy?.release ? "update" : i.kind }, ...(i.kind === "limit" ? [] : whereParts(i, hasLead))];
   if (notMerged(i)) out.push({ text: "not merged", warn: true });
   // The console's own deploy ticket: where its run is.
   const run = i.kind === "deploy" ? i.deploy?.run : undefined;
@@ -123,6 +123,7 @@ export function kindChip(i: QueueItem, now: number): { text: string; block: bool
     return { text: `${i.kind} · ${state}`, block: false };
   }
   if (i.kind === "deploy") return { text: `${i.deploy?.release ? "update" : "deploy"} · from the console`, block: false };
+  if (i.kind === "limit") return { text: "usage limit · the agents wait", block: true };
   if (i.blocking) return { text: `${i.kind} · blocks the agent`, block: true };
   return { text: `${i.kind} · ${i.kind === "pr" || i.kind === "preview" ? "for review" : "not blocking"}`, block: false };
 }

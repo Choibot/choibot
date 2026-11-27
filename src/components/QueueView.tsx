@@ -33,6 +33,7 @@ import { PhoneHeader } from "./PhoneHeader";
 import { BackIcon, CheckIcon, ChevronIcon, DiamondIcon, ExternalIcon, Mark } from "./SideIcons";
 import { PrDiffPanel } from "./PrDiffPanel";
 import { DeployPanel } from "./DeployPanel";
+import { LimitPanel } from "./LimitPanel";
 import { askMerge, MergeButton, MergeHooksContext, MergeLine, MoreMenu, useMergeOff, type MoreItem } from "./QueueMerge";
 import { recentDeployed } from "../lib/deploy";
 import { appendTranscript, browserSpeech, pushToTalk, type PushToTalk, type VoiceView } from "../lib/voice";
@@ -76,12 +77,14 @@ export function Md({ text }: { text: string }) {
 // The reading pane's head in words: "PR · For review", with the kind word of the thread's ticket
 // card (kindWord). The chip text stays the lib's (kindChip); only its first word is replaced.
 const cap = (t: string) => t.charAt(0).toUpperCase() + t.slice(1);
+// The console's own tickets (deploy, usage limit): no share, no reply box.
+const isConsoleTicket = (i: QueueItem): boolean => i.kind === "deploy" || i.kind === "limit";
 const headWords = (i: QueueItem, chipText: string) => [kindWord(i), ...chipText.split(" · ").slice(1).map(cap)];
 // The dot of the head, as on the thread's ticket card: blue = the agent waits on you (and the
 // deploy ticket), amber = waits on a PR, green = answered, hollow = the rest.
 function headTone(i: QueueItem, now: number): Tone | "ok" | "idle" {
   const live = i.status === "open" || (i.status === "snoozed" && (i.snoozedUntil ?? 0) <= now);
-  if (live) return prWait(i) ? "wait" : i.blocking || i.kind === "deploy" ? "turn" : "idle";
+  if (live) return prWait(i) ? "wait" : i.blocking || i.kind === "deploy" || i.kind === "limit" ? "turn" : "idle";
   if (i.status === "snoozed") return "idle";
   return i.status === "answered" || i.status === "auto" || closedMark(i) === "✓" ? "ok" : "idle";
 }
@@ -881,7 +884,7 @@ function Detail({ item: i, now, onBack, onOpenAgent, readOnly, userAuth, draft, 
     item: i, now, ...(onOpenAgent ? { onOpenAgent } : {}),
     children: (
       <>
-        {!onBack && i.kind !== "deploy" && <ShareHead item={i} readOnly={readOnly} />}
+        {!onBack && !isConsoleTicket(i) && <ShareHead item={i} readOnly={readOnly} />}
         {canSnooze && (
           <button type="button" className={`${s.b} ${s.ghost}`} onClick={() => onAct("snooze")}>Snooze 1 h{!onBack && <kbd className={s.key}>s</kbd>}</button>
         )}
@@ -925,14 +928,16 @@ function Detail({ item: i, now, onBack, onOpenAgent, readOnly, userAuth, draft, 
     <section className={s.read} aria-label="Item detail" data-queue-detail="">
       {onBack ? <BackBar onBack={onBack}>{bar.acts}</BackBar> : <div className={s.rh}>{bar.info}{bar.acts}</div>}
       <div className={s.in}>
-        {onBack && <div className={s.top}>{bar.info}{i.kind !== "deploy" && <ShareHead item={i} readOnly={readOnly} phone />}</div>}
-        {i.kind !== "deploy" && <SharePanel item={i} readOnly={readOnly} />}
+        {onBack && <div className={s.top}>{bar.info}{!isConsoleTicket(i) && <ShareHead item={i} readOnly={readOnly} phone />}</div>}
+        {!isConsoleTicket(i) && <SharePanel item={i} readOnly={readOnly} />}
         <h2 className={s.title}><Linked text={i.title} /></h2>
         {i.body && <Md text={i.body} />}
         {i.html && <RichPart key={i.id} item={i} className={s.rich} />}
         {/* The console's own deploy ticket: its state and its one button. Shown read-only too
             (the button then says "Pair this device to deploy"). It has no reply and no answer. */}
         {i.kind === "deploy" && <DeployPanel item={i} readOnly={readOnly} userAuth={userAuth} />}
+        {/* The usage-limit ticket: its rows and their buttons. It has no reply and no answer. */}
+        {i.kind === "limit" && <LimitPanel item={i} readOnly={readOnly} userAuth={userAuth} />}
         <Thumbs item={i} onZoom={onZoom} />
         {/* The facts as one row of pills: merge state, checks, previews, then the size, which opens the diff. */}
         {(pr || previewUrl) && (
@@ -989,7 +994,7 @@ function Detail({ item: i, now, onBack, onOpenAgent, readOnly, userAuth, draft, 
         )}
         {rec && <div className={s.rec}><DiamondIcon size={12} />{rec}{i.recommend?.why ? <span className={s.why}> <Linked text={i.recommend.why} /></span> : null}</div>}
       </div>
-      {i.kind === "deploy" ? null : readOnly ? (
+      {isConsoleTicket(i) ? null : readOnly ? (
         <div className={s.foot} data-closed="">
           <span className={`${s.why} ${s.grow}`}>Read-only. Pair this device to answer.</span>
           {wait && <div className={s.footActs}>{waitLink(s.b)}{pr && <MergeButton item={i} readOnly userAuth={userAuth} phone={!!onBack} />}</div>}
@@ -1111,7 +1116,7 @@ function Closed({ item: i, now, onBack, onOpenAgent, readOnly, userAuth, canUndo
     item: i, now, ...(onOpenAgent ? { onOpenAgent } : {}),
     children: (
       <>
-        {!onBack && i.kind !== "deploy" && <ShareHead item={i} readOnly={readOnly} />}
+        {!onBack && !isConsoleTicket(i) && <ShareHead item={i} readOnly={readOnly} />}
         {onClose && <button type="button" className={`${s.b} ${s.ghost}`} onClick={onClose}>Close<kbd className={s.key}>Esc</kbd></button>}
       </>
     ),
@@ -1120,12 +1125,13 @@ function Closed({ item: i, now, onBack, onOpenAgent, readOnly, userAuth, canUndo
     <section className={s.read} aria-label="Item detail">
       {onBack ? <BackBar onBack={onBack}>{bar.acts}</BackBar> : <div className={s.rh}>{bar.info}{bar.acts}</div>}
       <div className={s.in}>
-        {onBack && <div className={s.top}>{bar.info}{i.kind !== "deploy" && <ShareHead item={i} readOnly={readOnly} phone />}</div>}
-        {i.kind !== "deploy" && <SharePanel item={i} readOnly={readOnly} />}
+        {onBack && <div className={s.top}>{bar.info}{!isConsoleTicket(i) && <ShareHead item={i} readOnly={readOnly} phone />}</div>}
+        {!isConsoleTicket(i) && <SharePanel item={i} readOnly={readOnly} />}
         <h2 className={s.title}><Linked text={i.title} /></h2>
         {i.body && <Md text={i.body} />}
         {i.html && <RichPart key={i.id} item={i} className={s.rich} />}
         {i.kind === "deploy" && <DeployPanel item={i} readOnly={readOnly} userAuth={userAuth} />}
+        {i.kind === "limit" && <LimitPanel item={i} readOnly={readOnly} userAuth={userAuth} />}
         <Thumbs item={i} onZoom={onZoom} />
         {i.kind === "choice" && i.choice && (
           <div className={s.options} role="list" aria-label="Options">

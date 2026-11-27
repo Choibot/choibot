@@ -1,4 +1,5 @@
 // server/agents/store.ts
+import type { AgentModel } from "./model.js";
 import { mkdir, readFile, writeFile, readdir, stat, unlink } from "node:fs/promises";
 import { join } from "node:path";
 import { isAgentId } from "../ids.js";
@@ -28,6 +29,9 @@ export type AgentRecord = {
   // Claude login the agent runs under (see accounts.ts). Absent = the box's
   // default login. Codex agents ignore it.
   account?: string;
+  // The model the agent starts and resumes on (`--model`, model.ts), set at spawn only.
+  // Absent = the console's setting (startModel). Codex agents never have one.
+  model?: AgentModel;
   // Rail position set by drag-to-reorder. Absent = after every ordered agent,
   // by createdAt.
   order?: number;

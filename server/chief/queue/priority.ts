@@ -2,7 +2,7 @@
 // Pure; the Next client imports it, so: types only, no runtime imports.
 import type { QueueItem } from "./types.js";
 
-const BASE: Record<QueueItem["kind"], number> = { question: 40, pr: 35, choice: 30, deploy: 30, preview: 20 };
+const BASE: Record<QueueItem["kind"], number> = { question: 40, pr: 35, choice: 30, deploy: 30, limit: 40, preview: 20 };
 const AGE_STEP_MS = 10 * 60_000;
 const AGE_CAP = 30;
 

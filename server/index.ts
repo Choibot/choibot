@@ -64,6 +64,7 @@ import { gh, ghJson } from "./gh/exec.js";
 import { listRepos as listGhRepos } from "./gh/repos.js";
 import { registerSettingsApi } from "./settings/api.js";
 import { registerShareSettings, shareToolFromEnv } from "./settings/share.js";
+import { registerModelSettings, wrongModelLine } from "./settings/model.js";
 import { registerVersionApi, registerVersionHeader, versionInfo } from "./release.js";
 import { BotCheck, testTelegramApi } from "./settings/telegram.js";
 import { consoleStepProbes, makesStale, registerSetupApi } from "./setup/api.js";
@@ -134,6 +135,8 @@ import { BoxCodes, firstRunOn, newInstall, registerFirstRun } from "./chief/firs
 import { ClaimLinks } from "./chief/claimlink.js";
 import { addDeviceOn, registerAddDevice } from "./chief/adddevice.js";
 import { registerDeployApi } from "./chief/deploy/api.js";
+import { registerLimitApi } from "./chief/limit/api.js";
+import { LimitTicket } from "./chief/limit/service.js";
 import { makeDeployService } from "./chief/deploy/boot.js";
 import type { DeployService } from "./chief/deploy/service.js";
 import { UpdateService } from "./update/service.js";
@@ -683,6 +686,10 @@ async function main() {
   // share routes below. Off until set; a save applies at once.
   const shareTool = shareToolFromEnv(process.env);
   registerShareSettings(app, { setting: shareTool, envFile: envFilePath(process.env, process.cwd()), gate: chief?.gate });
+  // The model of an agent with none of its own (agents/model.ts); a value that is not a model: one line.
+  registerModelSettings(app, { envFile: envFilePath(process.env, process.cwd()), gate: chief?.gate });
+  const wrongModel = wrongModelLine();
+  if (wrongModel) console.warn(wrongModel);
   // Which version runs (Settings, "Version"; the updater's check after a start): read once, now.
   registerVersionApi(app, ownVersion);
   // The login of the Set-up step: the app's, or gh's own (below).
@@ -828,7 +835,20 @@ async function main() {
   // One runtime (inbox + event queue) per lead, with `areas` only: the master
   // queue drops a live lead's workers' events, which that lead's queue takes,
   // and copies their queue items to it. Flag off and misconfigured: as before.
-  if (areas) leadRuntimes = new LeadRuntimes({ hub, agents: store, issues: issueStore, acted, terminals, areas });
+  if (areas) {
+    leadRuntimes = new LeadRuntimes({
+      hub, agents: store, issues: issueStore, acted, terminals, areas,
+      // A lead's own quiet policy (chief/leads/quiet.ts): an active core only, as the master's.
+      ...(chief && presence ? {
+        quiet: {
+          blockedMs: quietMs.blockedMs,
+          userPresent: (id: string) => presence.recent(id, quietMs.presentMs),
+          queue: chief.queue,
+          workspaceDir: resolveWorkspaceDir(),
+        },
+      } : {}),
+    });
+  }
   const leads = leadRuntimes;
   const fleetEvents = new EventQueue({
     hub, agents: store, issues: issueStore, acted,
@@ -836,8 +856,8 @@ async function main() {
     // or the Coordinator with the chief of staff active).
     cron: true,
     ...(areas && leads ? { accept: masterAccept(areas), leads: { get: (id: string) => leads.get(id)?.events } } : {}),
-    // The quiet policy (order of 2026-11-10): an active core only, and only
-    // the master's queue; a lead's queue (LeadRuntimes) never gets it.
+    // The quiet policy (order of 2026-11-10): an active core only. A lead's
+    // queue (LeadRuntimes) has its own (chief/leads/quiet.ts).
     ...(chief && presence ? {
       quiet: {
         blockedMs: quietMs.blockedMs,
@@ -924,6 +944,10 @@ async function main() {
   // archive install gets the Update ticket of root's updater in its place (server/update).
   let deploy: DeployService | UpdateService | undefined;
   let stopDeployWatch: (() => void) | undefined;
+  // The usage-limit ticket (chief/limit): one ticket of the console for the agents that a usage
+  // limit blocks. It starts after the boot, with the deploy watch.
+  let limitTicket: LimitTicket | undefined;
+  let stopLimit: (() => void) | undefined;
   if (chief) {
     // The queue Deliverer (spec §5.4). runChiefBoot starts it, after its boot
     // scan; until then an answer's kick only marks the item.
@@ -964,6 +988,8 @@ async function main() {
       : await makeDeployService(chief, { dev });
     deploy = deployService;
     registerDeployApi(app, { gate: chief.gate, deploy: deployService });
+    limitTicket = new LimitTicket({ store: chief.queue, agents: agentApi.limitOps });
+    registerLimitApi(app, { gate: chief.gate, limit: limitTicket });
     let poster: CardPoster | undefined;
     // The chat of the ticket cards: the fleet master chat (as before). With a connected account
     // and no fleet master chat: the user's private chat with the bot, so tickets reach the phone
@@ -982,7 +1008,7 @@ async function main() {
         tg: issuesTg, cfg: cardChat, consoleUrl: chief.consoleUrl, misconfigured: chief.misconfigured,
         userAuth: chief.userAuth, pairing: chief.pairing, devices: chief.devices,
         rules: chief.rules, decisions: chief.decisions, cards, paths: chief.paths, hub, capture: chiefCapture?.line,
-        queue: chief.queue, actions: queueActions, queueStore: chief.queue, deploy: deployService, files: issuesTg,
+        queue: chief.queue, actions: queueActions, queueStore: chief.queue, deploy: deployService, limit: limitTicket, files: issuesTg,
       });
     }
     // The master's `answer --auto` (spec §5.6); its Telegram one-liner goes
@@ -1241,6 +1267,7 @@ async function main() {
     try { stopReminders?.(); } catch { /* best effort */ }
     try { stopPrWatch?.(); } catch { /* best effort */ }
     try { stopDeployWatch?.(); } catch { /* best effort */ }
+    try { stopLimit?.(); } catch { /* best effort */ }
     try { stopCardPoster?.(); } catch { /* best effort */ }
     try { terminals.shutdown(); } catch { /* best effort */ }
     try { promptWatcher.dispose(); } catch { /* best effort */ }
@@ -1465,6 +1492,7 @@ async function main() {
       }).finally(async () => {
         await deploy?.afterBoot(r);
         stopDeployWatch = deploy?.startWatch();
+        if (chief.active) stopLimit = limitTicket?.start(hub);
       });
     },
   }).finally(() => {

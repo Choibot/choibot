@@ -14,6 +14,7 @@ import { agentPrompt } from "./argv.js";
 import { resolveWidgetsDataDir } from "../widgets/paths.js";
 import { pick, isRuntimeId } from "./runtimes/index.js";
 import type { Preset } from "./runtimes/types.js";
+import { isAgentModel, MODEL_REFUSAL, startModel, type AgentModel } from "./model.js";
 import { claudeHooksPath } from "./runtimes/claude.js";
 import { discard } from "./reconcile.js";
 import { listRepos, ensureBaseBranch, defaultBranch } from "./repos.js";
@@ -58,7 +59,7 @@ export function makeSpawnDeps(d: {
 export type SpawnRequest = {
   prompt?: string; repo?: string; baseBranch?: string; createFrom?: string; branch?: string;
   // `unknown`: these arrive from JSON on the wire and must be checked before use.
-  runtime?: unknown; account?: unknown;
+  runtime?: unknown; account?: unknown; model?: unknown;
   // Server-side only — the HTTP route never copies these from the request body.
   kind?: "issue"; issueId?: string; label?: string; spawnedBy?: string;
 };
@@ -129,6 +130,14 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
     }
     runtimeId = wantedRuntime;
   }
+  // The model (model.ts): absent, null or blank means none; else one alias, for a Claude agent.
+  const wantedModel = typeof req.model === "string" ? req.model.trim() : req.model;
+  let model: AgentModel | undefined;
+  if (wantedModel != null && wantedModel !== "") {
+    if (!isAgentModel(wantedModel)) return { ok: false, code: 400, error: MODEL_REFUSAL };
+    if (runtimeId !== "claude") return { ok: false, code: 400, error: "model is for a Claude agent only" };
+    model = wantedModel;
+  }
   // Hardened (final review C1): the caller's branch, base and start names are
   // plain ref text, checked before any git call. Not hardened: null.
   const refRefused = hardenedRefRefusal({
@@ -170,7 +179,7 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
     record = {
       id, label, repo: "", worktree: workspaceDir, branch: "", baseBranch: "",
       sessionId: null, hookToken: randomUUID(), status: initialStatus, createdAt: Date.now(),
-      cwd, runtime: runtimeId, ...(account ? { account } : {}), ...extra,
+      cwd, runtime: runtimeId, ...(account ? { account } : {}), ...(model ? { model } : {}), ...extra,
     };
   } else {
     const match = (await listRepos(workspaceDir)).find((r) => r.path === repo);
@@ -220,7 +229,7 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
       id, label, repo: match.path,
       worktree: wt.path, branch: wt.branch, baseBranch: base,
       sessionId: null, hookToken: randomUUID(), status: initialStatus, createdAt: Date.now(),
-      cwd, runtime: runtimeId, ...(account ? { account } : {}), ...extra,
+      cwd, runtime: runtimeId, ...(account ? { account } : {}), ...(model ? { model } : {}), ...extra,
       ...(x && folders ? { clone: true as const } : {}),
     };
   }
@@ -234,7 +243,8 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
     // Every agent gets the widgets instruction; worktree agents also get the
     // shared-docs one (plus the issue prompt for kind "issue"). Computed once
     // so prepare() and buildArgs() carry the SAME prompt.
-    const preset: Preset = { systemPrompt: agentPrompt(record, resolveWidgetsDataDir(), await chiefPromptFor(record.kind, { repoDir: process.cwd() })) };
+    const model = runtimeId === "claude" ? startModel(record, { fresh: true }) : undefined;
+    const preset: Preset = { ...(model ? { model } : {}), systemPrompt: agentPrompt(record, resolveWidgetsDataDir(), await chiefPromptFor(record.kind, { repoDir: process.cwd() })) };
     const prepared = await runtime.prepare(record, {
       port, workspaceDir, systemPrompt: preset.systemPrompt, accounts,
     });

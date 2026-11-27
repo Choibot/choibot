@@ -108,9 +108,9 @@ describe("agents api", () => {
     expect(rec?.baseBranch).toBe("main");
     // an initial prompt means claude starts working immediately → running
     expect(rec?.status).toBe("running");
-    // default config → no --model flag (claude uses box default)
+    // default config → the console's model setting, opus when not set (agents/model.ts)
     const spawned = terminals.spawned.find((s) => s.id === id)!;
-    expect(spawned.args).not.toContain("--model");
+    expect(spawned.args.slice(spawned.args.indexOf("--model"), spawned.args.indexOf("--model") + 2)).toEqual(["--model", "opus"]);
     expect(spawned.args).toContain("--dangerously-skip-permissions");
     expect(spawned.args).toContain("fix the bug");
     await cleanup();

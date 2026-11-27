@@ -99,7 +99,7 @@ describe("EventQueue mapping", () => {
     expect(d).toContain("agent-1a2b3c4d app-shop at-limit (its Claude login has no room, so its turn was cut.");
     expect(d).toContain("agent-5e6f7a8b indexer model-error (");
     expect(d).not.toContain("waiting");
-    expect(digestLine({ agentId: A, repo: "app-shop", kind: "at-limit" })).toMatch(/It did not end its work\. The user can move it to another login; a new worker can name a login with "account"\)$/);
+    expect(digestLine({ agentId: A, repo: "app-shop", kind: "at-limit" })).toMatch(/It did not end its work\. The user can move it to another login; a new worker can name a login with "account"\. The user has the console's usage-limit ticket for it: add no ticket for this block\)$/);
   });
 
   it("maps idle/error/done and ignores running", async () => {

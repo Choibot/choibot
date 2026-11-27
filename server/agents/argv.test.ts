@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 import { NO_MERGE_RULE, brainPrompt } from "../chief/brain/prompt.js";
 import { queueAgentPrompt } from "../chief/queue/prompt.js";
 import { remindAgentPrompt } from "../chief/remind/prompt.js";
-import { buildClaudeArgs, SHARED_DOCS_PROMPT, ISSUE_AGENT_PROMPT, repoAgentPrompt, agentPrompt, clonePushPrompt, widgetsPrompt } from "./argv.js";
+import { buildClaudeArgs, SHARED_DOCS_PROMPT, ISSUE_AGENT_PROMPT, TOKEN_RULES, repoAgentPrompt, agentPrompt, clonePushPrompt, widgetsPrompt } from "./argv.js";
 
 describe("SHARED_DOCS_PROMPT", () => {
   it("names the manifest and the self-contained artifact rule", () => {
@@ -93,37 +93,39 @@ describe("widgetsPrompt", () => {
 
 describe("agentPrompt", () => {
   const root = "/data/widgets";
+  const tail = (id: string) => widgetsPrompt(`/data/widgets/${id}`);
   it("repo agent: docs prompt, then the widgets prompt for its own folder", () => {
-    expect(agentPrompt({ id: "a1", repo: "/r" }, root))
-      .toBe(`${SHARED_DOCS_PROMPT}\n\n${widgetsPrompt("/data/widgets/a1")}`);
+    expect(agentPrompt({ id: "a1", repo: "/r" }, root)).toBe(`${SHARED_DOCS_PROMPT}\n\n${tail("a1")}`);
   });
   it("issue agent: docs, issue, then widgets", () => {
     expect(agentPrompt({ id: "i1", repo: "/r", kind: "issue" }, root))
-      .toBe(`${SHARED_DOCS_PROMPT}\n\n${ISSUE_AGENT_PROMPT}\n\n${widgetsPrompt("/data/widgets/i1")}`);
+      .toBe(`${SHARED_DOCS_PROMPT}\n\n${ISSUE_AGENT_PROMPT}\n\n${tail("i1")}`);
   });
   it("workspace agent: widgets only", () => {
-    expect(agentPrompt({ id: "w1", repo: "" }, root)).toBe(widgetsPrompt("/data/widgets/w1"));
+    expect(agentPrompt({ id: "w1", repo: "" }, root)).toBe(tail("w1"));
   });
-  it("with chief: base, NO_MERGE_RULE, then the queue paragraph, for worker, issue and workspace", () => {
+  it("with chief: widgets (no Docs text), the token rules, NO_MERGE_RULE, then the queue paragraph, for worker, issue and workspace", () => {
     for (const rec of [{ id: "a1", repo: "/r" }, { id: "i1", repo: "/r", kind: "issue" }, { id: "w1", repo: "" }]) {
-      const plain = { ...rec, kind: rec.kind === "issue" ? undefined : rec.kind };
-      const base = agentPrompt(plain, root);
       const withChief = agentPrompt(rec, root, { brain: "", cli: "C" });
-      const expectedBase = rec.kind === "issue"
-        ? `${SHARED_DOCS_PROMPT}\n\n${widgetsPrompt("/data/widgets/i1")}`
-        : agentPrompt(rec, root);
-      expect(base.length).toBeGreaterThan(0);
-      expect(withChief).toBe(`${expectedBase}\n\n${NO_MERGE_RULE}\n\n${queueAgentPrompt("C")}\n\n${remindAgentPrompt("C")}`);
+      expect(withChief).toBe(`${tail(rec.id)}\n\n${TOKEN_RULES}\n\n${NO_MERGE_RULE}\n\n${queueAgentPrompt("C")}\n\n${remindAgentPrompt("C")}`);
       expect(withChief).not.toContain(ISSUE_AGENT_PROMPT);
+      expect(withChief).not.toContain(SHARED_DOCS_PROMPT);
       expect(withChief.indexOf("queue withdraw")).toBeGreaterThan(withChief.indexOf(NO_MERGE_RULE));
       expect(withChief).toContain('{"pr": {"branch": "<your branch>"}}');
       expect(withChief).toContain(".choibot/previews/<topic>-<n>.png");
     }
   });
+  it("the token rules: four lines under one heading, each one line", () => {
+    const lines = TOKEN_RULES.split("\n");
+    expect(lines[0]).toBe("## Token use");
+    expect(lines.slice(1)).toHaveLength(4);
+    for (const l of lines.slice(1)) expect(l.startsWith("- ")).toBe(true);
+    expect(TOKEN_RULES).toContain('"haiku" or "sonnet"');
+  });
   it("with a brain: brainPrompt follows NO_MERGE_RULE", () => {
     const rec = { id: "a1", repo: "/r" };
     const out = agentPrompt(rec, root, { brain: "## Always\n- x [r_1]", cli: "C" });
-    expect(out).toBe(`${agentPrompt(rec, root)}\n\n${NO_MERGE_RULE}\n\n${queueAgentPrompt("C")}\n\n${remindAgentPrompt("C")}\n\n${brainPrompt("## Always\n- x [r_1]")}`);
+    expect(out).toBe(`${tail("a1")}\n\n${TOKEN_RULES}\n\n${NO_MERGE_RULE}\n\n${queueAgentPrompt("C")}\n\n${remindAgentPrompt("C")}\n\n${brainPrompt("## Always\n- x [r_1]")}`);
   });
 });
 

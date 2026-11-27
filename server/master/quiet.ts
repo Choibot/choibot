@@ -1,7 +1,7 @@
 // server/master/quiet.ts — the fleet master's quiet policy (order of
 // 2026-11-10): the queue is the one place the user looks at, so the master's
 // digest carries only alerts. Built in index.ts on an active chief core only;
-// with the flag off (or for a lead's queue) nothing here runs.
+// with the flag off nothing here runs.
 //
 // What the policy does to the master's digest (EventQueue, `quiet` dep):
 //   errored, lead-errored, service crashed   always pass
@@ -17,6 +17,7 @@
 //                                            report `needs: "none"`
 // The user's own lines, `[queue <id>]` answers and `[reminder <id>]` lines do
 // not go through the EventQueue: nothing here can filter them.
+// A lead's queue has its own version of this policy: chief/leads/quiet.ts.
 import { isPersistentAgentId, type ItemKind } from "../chief/kinds.js";
 import type { Rule } from "../chief/brain/store.js";
 import type { QueueItem } from "../chief/queue/types.js";
@@ -52,6 +53,9 @@ export type QuietPolicy = {
   // May a choice or question item's line go to the master?
   queueEcho(itemId: string): Promise<boolean>;
   now?: () => number;
+  // A lead's queue only (chief/leads/quiet.ts): a `finished` is held as a `waiting` is, a due
+  // held line goes out only when explained() is false, and no service line enters.
+  lead?: { explained(agentId: string): Promise<boolean> };
 };
 
 // When the user last typed to each agent from the browser. In memory only: a

@@ -44,8 +44,9 @@ import { spawnAgent, makeSpawnDeps, resolveAccount, WORKSPACE_REPO } from "./spa
 import type { AreaStore } from "../chief/leads/areas.js";
 import { hardenedDeployment } from "../chief/hardened.js";
 import { readThreadAfter, readThreadBefore, sessionFileFor } from "./threadfile.js";
-import { goOnText, readStop, type StopWhy } from "./stopwhy.js";
-import { sendToAgent, withTypingLock } from "../issues/reply.js";
+import { continueText, goOnText, readStopFile, type StopRead, type StopWhy } from "./stopwhy.js";
+import { sendToAgent, typeIntoAgentWhy, withTypingLock } from "../issues/reply.js";
+import type { GoOnResult, LimitAgents, LimitLogin } from "../chief/limit/service.js";
 import { isSubagentId } from "./thread.js";
 import { MAX_SUBAGENTS, hasLaterSubagents, newestWrite, openSubagentDir, subagentIdsOf, subagentStates } from "./subagents.js";
 import { resolveWorkspaceDir } from "../defaults.js";
@@ -176,7 +177,7 @@ export function registerAgentApi(
     // does not close a worker that has one. Without it a lead closes nothing.
     openQueueItem?: (agentId: string) => Promise<string | null>;
   },
-): { removeAgent: (id: string) => Promise<void>; checkWaiting: () => Promise<void> } {
+): { removeAgent: (id: string) => Promise<void>; checkWaiting: () => Promise<void>; limitOps: LimitAgents } {
   const { terminals, store, hub, accounts } = deps;
   const workspaceDir = deps.workspaceDir ?? resolveWorkspaceDir();
   const spawnDeps = makeSpawnDeps({ terminals, store, hub, workspaceDir, worktreeRoot: deps.worktreeRoot, accounts, usage: deps.usageNow ?? deps.usage });
@@ -489,10 +490,10 @@ export function registerAgentApi(
   }
 
   app.post("/api/agents", async (req: FastifyRequest, reply: FastifyReply) => {
-    const { prompt, repo, baseBranch, createFrom, branch, runtime, account } =
+    const { prompt, repo, baseBranch, createFrom, branch, runtime, account, model } =
       (req.body as {
         prompt?: string; repo?: string; baseBranch?: string;
-        createFrom?: string; branch?: string; runtime?: unknown; account?: unknown;
+        createFrom?: string; branch?: string; runtime?: unknown; account?: unknown; model?: unknown;
       }) ?? {};
     // kind/issueId/label/spawnedBy are server-side only — never taken from the
     // body. With chief on, spawnedBy is the calling agent's own id (spec §13).
@@ -508,7 +509,7 @@ export function registerAgentApi(
         if (refused) return reply.code(403).send({ error: refused });
       }
     }
-    const r = await spawnAgent(spawnDeps, { prompt, repo, baseBranch, createFrom, branch, runtime, account, ...(spawnedBy ? { spawnedBy } : {}) });
+    const r = await spawnAgent(spawnDeps, { prompt, repo, baseBranch, createFrom, branch, runtime, account, model, ...(spawnedBy ? { spawnedBy } : {}) });
     if (!r.ok) return reply.code(r.code).send({ error: r.error });
     // waitsLogin: no Claude login has room, the agent starts later. startedOn: it started on
     // another login than the default one. The caller (a lead, the page) reads why.
@@ -582,10 +583,15 @@ export function registerAgentApi(
   type MoveOutcome = "resumed" | "cold" | "patched" | "waits";
   // ---- an agent that a limit stopped: the reason, and "go on" after a move ----
 
-  // Why the last turn of the agent stopped, read from its session file now.
-  const stopOf = async (rec: AgentRecord): Promise<StopWhy | null> => {
+  // Why the last turn of the agent stopped, read from its session file now. stopRead tells a
+  // file that could not be found or read (ok false) from a file with no stop mark.
+  const stopRead = async (rec: AgentRecord): Promise<StopRead> => {
     const file = await sessionFileFor(rec, { workspaceDir, projectsRoot: deps.projectsRoot }).catch(() => null);
-    return file && file.ok ? readStop(file.path) : null;
+    return file && file.ok ? readStopFile(file.path) : { ok: false };
+  };
+  const stopOf = async (rec: AgentRecord): Promise<StopWhy | null> => {
+    const r = await stopRead(rec);
+    return r.ok ? r.stop : null;
   };
 
   // The login of `rec` is signed out (its session said so at `at`).
@@ -657,6 +663,15 @@ export function registerAgentApi(
   // A lead or the fleet master that a move gave a new login and whose relaunch waits for a quiet
   // moment: its id and the login its Claude still runs on.
   const moveWaits = new Map<string, string>();
+  // An id leaves when its relaunch is done: the relaunch's own list of waits (a relaunch that
+  // is done, or that failed, is not on it) is the truth. A relaunch armed for another reason
+  // (a new prompt), or of an agent that came from another login, does not count.
+  const pruneMoveWaits = (): void => {
+    const armed = new Set(deps.relaunchWaits?.() ?? []);
+    for (const mid of [...moveWaits.keys()]) if (!armed.has(mid)) moveWaits.delete(mid);
+  };
+  // Who hears that an agent was deleted (the usage-limit ticket).
+  const removedFns = new Set<(id: string) => void>();
   // A login was signed in from the page: what a sign-out held starts (agents/loginhold.ts).
   const startHeld = async (): Promise<void> => {
     const ids = (await deps.loginHold?.releaseAll().catch(() => [])) ?? [];
@@ -691,7 +706,7 @@ export function registerAgentApi(
     }
     await store.patch(rec.id, { account });
     const r = await deps.relaunchPersistent(rec.id);
-    if (r === "relaunched") return "resumed";
+    if (r === "relaunched") { moveWaits.delete(rec.id); return "resumed"; }
     // Busy: its Claude runs on the old login until the relaunch (a sign-out of that login waits).
     if (r === "waits") { moveWaits.set(rec.id, rec.account ?? DEFAULT_ACCOUNT); return "waits"; }
     throw new Error(r === "gone" ? "the agent is gone" : "the relaunch did not work; try again");
@@ -828,10 +843,8 @@ export function registerAgentApi(
         : (await (deps.recurringRuns?.() ?? Promise.resolve([]))).filter((r) => r.login === null || r.login === (strong ? DEFAULT_ACCOUNT : id)).map((r) => r.name);
       if ((out.recurring = await runsOnIt()).length) return stop("recurring");
       // A lead or the fleet master that a move took off this login and whose Claude still runs on
-      // it: its relaunch waits for a quiet moment. A relaunch armed for another reason (a new
-      // prompt), or of an agent that came from another login, does not count.
-      const armed = new Set(deps.relaunchWaits?.() ?? []);
-      for (const mid of [...moveWaits.keys()]) if (!armed.has(mid)) moveWaits.delete(mid);
+      // it: its relaunch waits for a quiet moment.
+      pruneMoveWaits();
       if ((out.waits = [...moveWaits.values()].filter((from) => from === key).length)) return stop("busy");
       // The agents on the login (the rule of the list of logins above).
       const open = (await store.list()).filter((r) => r.closedAt === undefined && (r.runtime ?? "claude") === "claude");
@@ -1159,6 +1172,9 @@ export function registerAgentApi(
       }
     }
     await store.delete(id);
+    moveWaits.delete(id);
+    // The usage-limit ticket drops its row now, not at its next minute.
+    for (const fn of [...removedFns]) { try { fn(id); } catch { /* a listener's fault */ } }
     // Best effort: a widget folder left behind is only disk space.
     await deps.widgets?.removeAgent(id).catch(() => { /* already gone */ });
   }
@@ -1303,5 +1319,46 @@ export function registerAgentApi(
     return reply.code(200).send({});
   });
 
-  return { removeAgent, checkWaiting };
+  // ---- the usage-limit ticket (chief/limit/service.ts): what it reads and does ----
+
+  // The logins with their use, as Settings shows them. Null with strong protection: the use of
+  // its login is not known here, and the persistent agents' login is not the user's to pick.
+  const limitLogins = async (): Promise<LimitLogin[] | null> => {
+    if (agentStatus) return null;
+    const list = await listAccounts(accounts);
+    const usage = deps.usage?.() ?? null;
+    const now = Date.now();
+    return list.map((a) => ({
+      // The name as the console shows it (src/lib/loginPick.ts loginShort): no e-mail address.
+      id: a.id, name: a.email ? a.email.split("@")[0] : a.isDefault ? "Main login" : a.id, loggedIn: a.loggedIn, signedOut: a.signedOut === true,
+      use: a.loggedIn ? loginUse(usage, a.id, list.length, now) : null,
+    }));
+  };
+
+  // Continue: in the agent's typing lock, so no other line comes between the check and the line.
+  // The stop mark is read again right before: an agent that works, or whose mark Claude cleared
+  // (its own continue after the reset), gets nothing.
+  const goOnAfterLimit = (id: string): Promise<GoOnResult> => withTypingLock(id, async (): Promise<GoOnResult> => {
+    const rec = await store.load(id);
+    if (!rec || rec.closedAt !== undefined) return "gone";
+    if (rec.status === "running") return "running";
+    if (rec.stop?.why !== "limit") return "no-mark";
+    const now = await stopOf(rec).catch(() => null);
+    if (now?.why !== "limit") return "no-mark";
+    if (deps.checkReady && terminals.has(id) && !terminals.inputReady(id)) return "starting";
+    return typeIntoAgentWhy(terminals, id, continueText(), deps.sleep);
+  });
+
+  const limitOps: LimitAgents = {
+    list: () => store.list(),
+    load: (id) => store.load(id),
+    stopRead,
+    logins: limitLogins,
+    move: (rec, login) => moveAgent(rec, login === DEFAULT_ACCOUNT ? undefined : login),
+    waitsToMove: (id) => { pruneMoveWaits(); return moveWaits.has(id); },
+    goOn: goOnAfterLimit,
+    onRemoved: (fn) => { removedFns.add(fn); return () => { removedFns.delete(fn); }; },
+  };
+
+  return { removeAgent, checkWaiting, limitOps };
 }

@@ -73,7 +73,7 @@ describe("queueCardText", () => {
   });
 
   it("uses the shared glyph table", () => {
-    expect(QUEUE_GLYPH).toEqual({ choice: "▸", pr: "⇄", preview: "▣", question: "?", deploy: "⟳" });
+    expect(QUEUE_GLYPH).toEqual({ choice: "▸", pr: "⇄", preview: "▣", question: "?", deploy: "⟳", limit: "◷" });
   });
 
   it("drops the rule text when it is unknown, and the star line without a recommendation", () => {

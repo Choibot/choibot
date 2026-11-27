@@ -65,8 +65,12 @@ export type LoginPick = { id: string; from?: { id: string; until: number | null 
 // console does not know which model an agent will use.
 const full = (u: LoginUse): boolean => u.atLimit || u.models.length > 0;
 const room = (u: LoginUse): number => 100 - (u.session ?? 0);
+// The same two rules for the usage-limit ticket (chief/limit/service.ts): a login has room, and
+// how much of its 5-hour window is left.
+export const hasRoom = (u: LoginUse): boolean => !full(u);
+export const roomLeft = room;
 // When a login with no room has room again.
-function backAt(u: LoginUse): number | null {
+export function backAt(u: LoginUse): number | null {
   if (u.atLimit) return u.until;
   const times = u.models.map((m) => m.until);
   return times.length > 0 && times.every((t): t is number => t !== null) ? Math.min(...times) : null;

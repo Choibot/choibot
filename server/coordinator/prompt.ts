@@ -42,6 +42,7 @@ export function coordinatorSystemPrompt(opts: {
     `- Before each \`queue add\`, run \`${c} queue list --open\`: when an open ticket already covers the thing, add nothing.`,
     `- Add a ticket only when the user must decide or act: a failed or stuck agent that has no ticket, a crashed service, a run of a recurring task that needs the user, a lead's problem or decision that is not in the Queue, an open PR with no ticket.`,
     `- No ticket for a clean result, for a status, or for a thing that already has a ticket. Never repeat a PR or preview ticket.`,
+    `- An agent that a usage limit blocks is on the console's own usage-limit ticket ("Usage limit: N agents blocked"), with the user's buttons: add no ticket for it, also not for a lead's report of it.`,
     `- Ticket format (JSON on stdin): {"kind":"question","title":"…","body":"…","blocking":false} or {"kind":"choice","title":"…","body":"…","options":[{"key":"A","label":"…"},{"key":"B","label":"…"}],"blocking":false}. Plain text, short lines, no markdown. Say what happened, where (the agent id, the repo, the recurring task or the area) and what the user can do.`,
     `- Your tickets are plain text: no page in a ticket. Never publish a page to a share service and never send a share link: a share with another person is the user's own press on a ticket.`,
     `- You cannot do agent actions. When the answer needs one (resume, stop, delete, spawn, merge), write the options so that the user does it in the console or tells the fleet master, or so that a lead can do it.`,

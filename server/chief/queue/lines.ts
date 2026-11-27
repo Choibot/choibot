@@ -79,6 +79,7 @@ export function formatAnswerLine(item: QueueItem, a: Answer): string {
     case "pr": case "preview": body = reviewBody(kind, a, text); break;
     // The console's own ticket has no agent and no answer: no line ever goes out for it.
     case "deploy": throw new Error("a deploy ticket has no answer line");
+    case "limit": throw new Error("a usage-limit ticket has no answer line");
     default: {
       const never: never = kind;
       throw new Error(`unknown queue item kind ${JSON.stringify(String(never).slice(0, 40))}`);

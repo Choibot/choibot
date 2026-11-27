@@ -60,6 +60,11 @@ describe("parseSessionLine: user", () => {
     expect(parseSessionLine(l)).toEqual([{ kind: "end", id: "toolu_1", ts: MS }]);
     const failed = user([{ type: "tool_result", tool_use_id: "toolu_2", content: "boom", is_error: true }], { origin: undefined });
     expect(parseSessionLine(failed)).toEqual([{ kind: "end", id: "toolu_2", ts: MS, error: true }]);
+    // A failed SendMessage has no is_error: its text says "success": false.
+    const unsent = user([{ type: "tool_result", tool_use_id: "toolu_3", content: [{ type: "text", text: '{"success":false,"message":"No agent named \'agent-1a\' is reachable."}' }] }], { origin: undefined });
+    expect(parseSessionLine(unsent)).toEqual([{ kind: "end", id: "toolu_3", ts: MS, error: true }]);
+    const sent = user([{ type: "tool_result", tool_use_id: "toolu_4", content: [{ type: "text", text: '{"success":true,"message":"sent"}' }] }], { origin: undefined });
+    expect(parseSessionLine(sent)).toEqual([{ kind: "end", id: "toolu_4", ts: MS }]);
   });
   it("joins text blocks, marks an image and drops a reminder block", () => {
     const l = user([

@@ -8,6 +8,7 @@
 import type { QueueItem } from "../../server/chief/queue/types"; // type-only
 import { sortOpen } from "../../server/chief/queue/priority";
 import { CONSOLE_AGENT_ID, DEPLOY_CLOSED, runLine, updateLine } from "../../server/chief/deploy/ticket";
+import { LIMIT_CLOSED } from "../../server/chief/limit/ticket";
 import { toBlocks, type Block, type Shown } from "./thread";
 
 export type TicketPhase = "open" | "snoozed" | "answered" | "withdrawn";
@@ -77,7 +78,7 @@ export function threadRows(items: Shown[], tickets: QueueItem[], now: number, un
   return out;
 }
 
-const KIND_WORD: Record<QueueItem["kind"], string> = { pr: "PR", preview: "Preview", choice: "Choice", question: "Question", deploy: "Deploy" };
+const KIND_WORD: Record<QueueItem["kind"], string> = { pr: "PR", preview: "Preview", choice: "Choice", question: "Question", deploy: "Deploy", limit: "Usage limit" };
 // The release variant of the console's own ticket (server/update) is an Update.
 export const kindWord = (i: QueueItem): string => (i.kind === "deploy" && i.deploy?.release ? "Update" : KIND_WORD[i.kind] ?? i.kind);
 
@@ -88,6 +89,12 @@ export function closedText(i: QueueItem): string {
       if (i.lastError === DEPLOY_CLOSED.deployed) return runLine(i.deploy?.run) || "Deployed";
       if (i.lastError === DEPLOY_CLOSED.live) return i.deploy?.release ? "Closed: this console runs the newest version" : "Closed: the running build has all of main";
       if (i.lastError === DEPLOY_CLOSED.updated || i.lastError === DEPLOY_CLOSED.updateFailed) return updateLine(i.deploy?.update) || "Update ended";
+      return "Dismissed";
+    }
+    if (i.kind === "limit") {
+      if (i.lastError === LIMIT_CLOSED.none) return "Closed: no agent is blocked now";
+      if (i.lastError === LIMIT_CLOSED.renotified) return "Closed: a newer ticket lists these agents";
+      if (i.lastError === LIMIT_CLOSED.duplicate) return "Closed: a duplicate";
       return "Dismissed";
     }
     if (i.lastError === "merged") return "PR merged";
@@ -117,7 +124,8 @@ export function closedText(i: QueueItem): string {
 // The mark of a closed ticket: ✓ for an answer and for a deploy that was done, × for any other
 // close with no answer (withdrawn, PR closed, agent gone).
 export const closedMark = (i: QueueItem): "✓" | "×" =>
-  (i.status !== "withdrawn" || (i.kind === "deploy" && (i.lastError === DEPLOY_CLOSED.deployed || i.lastError === DEPLOY_CLOSED.updated)) ? "✓" : "×");
+  (i.status !== "withdrawn" || (i.kind === "deploy" && (i.lastError === DEPLOY_CLOSED.deployed || i.lastError === DEPLOY_CLOSED.updated))
+    || (i.kind === "limit" && i.lastError === LIMIT_CLOSED.none) ? "✓" : "×");
 
 // When the ticket closed: the answer's time, else the close time.
 export const closedAt = (i: QueueItem): number => (i.status !== "withdrawn" && i.answer ? i.answer.at : i.closedAt ?? i.updatedAt);

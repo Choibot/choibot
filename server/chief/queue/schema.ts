@@ -171,6 +171,9 @@ export function validateUserAnswer(item: QueueItem, body: unknown): UserAnswer {
     // The console's own ticket (spec §5.7): no value is an answer. Deploy has its own route.
     case "deploy":
       return fail("a deploy ticket takes no answer: use Deploy");
+    // The usage-limit ticket (chief/limit): its buttons have their own route, for the user only.
+    case "limit":
+      return fail("a usage-limit ticket takes no answer: use its buttons");
     default:
       return fail("unknown item kind");
   }

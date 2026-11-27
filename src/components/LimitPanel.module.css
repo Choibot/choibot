@@ -1,0 +1,41 @@
+/* src/components/LimitPanel.module.css — the usage-limit ticket's block (A · Inset): one hairline
+   card, radius 12, one line per agent; colour only at dot size. */
+.box { display: flex; flex-direction: column; gap: 10px; padding: 6px 16px 14px; border: 1px solid var(--line-2); border-radius: var(--radius); font-size: var(--text-sm); line-height: 1.45; color: var(--ink-1); }
+.rows { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: 6px 0; border-bottom: 1px solid var(--line); }
+.row:last-child { border-bottom: 0; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--turn); }
+.dot[data-tone="run"] { background: var(--run); box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 28%, transparent); }
+.who { flex: 1 1 auto; min-width: 0; display: flex; align-items: baseline; gap: 4px 10px; flex-wrap: wrap; }
+.name { color: var(--ink-0); font-weight: var(--weight-medium); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+.meta { color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.row[data-state="going-on"] .name, .row[data-state="moves-when-quiet"] .name { color: var(--ink-1); }
+.acts { flex: none; display: flex; gap: 6px; }
+.all { display: flex; flex-wrap: wrap; gap: 6px; padding-top: 4px; }
+.btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: none; color: var(--ink-0);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color 0.12s ease;
+}
+/* A long login name ("Move all to …") ends in an ellipsis; the button's title holds the whole. */
+.label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (hover: hover) { .btn:hover:not(:disabled) { background: var(--bg-2); } }
+.btn:disabled { opacity: 0.45; cursor: default; }
+.btn[data-busy] { opacity: 1; animation: pulse 1.2s ease-in-out infinite; }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+.pri { border-color: transparent; background: var(--inv); color: var(--inv-ink); }
+@media (hover: hover) { .pri:hover:not(:disabled) { background: var(--inv-hover); } }
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+@media (prefers-reduced-motion: reduce) { .btn[data-busy] { animation: none; } }
+.hint { color: var(--ink-2); font-size: var(--text-xs); line-height: 1.45; }
+.error { display: flex; align-items: baseline; gap: 8px; color: var(--ink-0); overflow-wrap: anywhere; }
+.error::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--err); transform: translateY(-1px); }
+/* A phone: the buttons go under the name, and each is a full tap target. */
+@media (max-width: 640px) {
+  .row { flex-wrap: wrap; align-items: flex-start; padding: 10px 0; }
+  .dot { margin-top: 6px; }
+  .who { flex-direction: column; gap: 2px; flex-basis: calc(100% - 17px); }
+  /* min-width 0: a long "Move to …" ends in an ellipsis, it does not push the row past the card. */
+  .acts { flex-basis: 100%; min-width: 0; padding-left: 17px; flex-wrap: wrap; }
+  .btn { height: auto; min-height: 36px; padding: 8px 14px; touch-action: manipulation; flex: 0 1 auto; min-width: 0; max-width: 100%; }
+}

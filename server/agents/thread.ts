@@ -309,7 +309,7 @@ export function parseSessionLine(line: string, opts: ParseOpts = {}): ThreadItem
       const out: ThreadItem[] = [];
       for (const b of content) {
         if (isObj(b) && b.type === "tool_result" && typeof b.tool_use_id === "string" && b.tool_use_id) {
-          out.push({ kind: "end", id: b.tool_use_id, ts, ...(b.is_error === true ? { error: true } : {}) });
+          out.push({ kind: "end", id: b.tool_use_id, ts, ...(b.is_error === true || saysNoSuccess(b.content) ? { error: true } : {}) });
         }
       }
       // A subagent launch: the harness's own record of the result names the
@@ -355,6 +355,20 @@ export function parseSessionLine(line: string, opts: ParseOpts = {}): ThreadItem
     return [{ kind: "note", id: uuid, ts, text: "Context compacted" }];
   }
   return [];
+}
+
+// A result that is a JSON object with "success": false failed, also with no is_error (a
+// SendMessage to a session that is not reachable says so only in its text).
+function saysNoSuccess(content: unknown): boolean {
+  const text = typeof content === "string" ? content
+    : Array.isArray(content) && content.length === 1 && isObj(content[0]) && content[0].type === "text" ? str(content[0].text) : "";
+  if (!text.startsWith("{") || text.length > 4096) return false;
+  try {
+    const v: unknown = JSON.parse(text);
+    return isObj(v) && v.success === false;
+  } catch {
+    return false;
+  }
 }
 
 // Give each step the end of its result when both are in `items`, and keep an

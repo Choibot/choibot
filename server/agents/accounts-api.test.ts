@@ -12,6 +12,9 @@ import { EventHub } from "../events.js";
 import type { AccountPaths } from "./accounts.js";
 import { AgentLoginStatus, agentLoginStatus } from "./agentlogin.js";
 import type { AgentRecord } from "./store.js";
+import { claudeJsonPath } from "./accounts.js";
+import { continueText } from "./consoleline.js";
+import { pasteOf } from "../issues/reply.js";
 
 type SpawnCall = { id: string; cwd: string; args: string[]; command?: string; env?: Record<string, string> };
 
@@ -273,18 +276,19 @@ describe("accounts api: a login at its limit", () => {
     hookToken: "t", status: "idle", createdAt: 1, ...(account ? { account } : {}), ...over,
   } as never);
 
-  async function setUp(over: { relaunch?: (id: string) => Promise<"relaunched" | "waits" | "gone" | "failed"> } = {}) {
+  async function setUp(over: { relaunch?: (id: string) => Promise<"relaunched" | "waits" | "gone" | "failed">; relaunchWaits?: () => string[] } = {}) {
     const a = Fastify();
     const terminals = fakeTerminals();
-    registerAgentApi(a, {
+    const api = registerAgentApi(a, {
       terminals: terminals as any, store, hub: new EventHub(), workspaceDir: join(base, "ws"), accounts: paths,
       usage: () => FULL, defaultLoginFile: join(base, "data", "default-login.json"), relaunchPersistent: over.relaunch,
+      relaunchWaits: over.relaunchWaits,
     });
     await mkdir(join(base, "ws"), { recursive: true });
     await logIn("default");
     await a.inject({ method: "POST", url: "/api/accounts", payload: { id: "work" } });
     await logIn("work");
-    return { a, terminals };
+    return { a, terminals, api };
   }
 
   afterEach(async () => { const { forgetDefaultLogin } = await import("./accounts.js"); forgetDefaultLogin(); });
@@ -376,6 +380,39 @@ describe("accounts api: a login at its limit", () => {
     answer = "failed";
     res = await a.inject({ method: "POST", url: `/api/agents/${lead}/account`, payload: { account: "work" } });
     expect(res.statusCode).toBe(500);
+    await a.close();
+  });
+
+  // The usage-limit ticket's "Moves when quiet" row (chief/limit/service.ts) asks waitsToMove: it
+  // is true only while the relaunch of the chief of staff still waits to move the agent.
+  it("the ticket's 'moves when quiet': true while the relaunch waits, false once it is done, failed or the agent is deleted", async () => {
+    let answer: "relaunched" | "waits" = "waits";
+    const armed = new Set<string>();
+    const { a, api } = await setUp({ relaunch: async (id) => { if (answer === "waits") armed.add(id); else armed.delete(id); return answer; }, relaunchWaits: () => [...armed] });
+    const removed: string[] = [];
+    api.limitOps.onRemoved((id) => removed.push(id));
+    const lead = "55555555-5555-4555-8555-555555555555";
+    await worker(lead, undefined, { kind: "lead" });
+    const { waitsToMove, move } = api.limitOps;
+    expect(await move((await store.load(lead))!, "work")).toBe("waits");
+    expect(waitsToMove(lead)).toBe(true);
+    // The relaunch moved it when it was quiet: its wait list no longer has it.
+    armed.delete(lead);
+    expect(waitsToMove(lead)).toBe(false);
+    // Busy again: waits; then a move that relaunches at once ends the wait, also if the list is late.
+    expect(await move((await store.load(lead))!, "default")).toBe("waits");
+    expect(waitsToMove(lead)).toBe(true);
+    answer = "relaunched";
+    armed.add(lead);
+    expect(await move((await store.load(lead))!, "work")).toBe("resumed");
+    expect(waitsToMove(lead)).toBe(false);
+    // A delete: the ticket hears it at once, and the wait goes with the agent.
+    answer = "waits";
+    expect(await move((await store.load(lead))!, "default")).toBe("waits");
+    expect(waitsToMove(lead)).toBe(true);
+    expect((await a.inject({ method: "POST", url: `/api/agents/${lead}/delete` })).statusCode).toBe(202);
+    expect(removed).toEqual([lead]);
+    expect(waitsToMove(lead)).toBe(false);
     await a.close();
   });
 
@@ -772,6 +809,65 @@ describe("an agent and a Claude login at its limit", () => {
     expect(rec?.account).toBeUndefined();
     expect(rec?.startedOn).toBeUndefined();
     expect(res.json()).toEqual({ id: res.json().id });
+    await a.close();
+  });
+
+  // The usage-limit ticket's Continue (chief/limit/service.ts): the mark is read again in the
+  // agent's typing lock, right before the line; it never doubles Claude's own continue.
+  it("the ticket's Continue: the line goes only to a live agent that the limit still stops, with no menu on its screen", async () => {
+    const { a, t, api } = await setUp();
+    await worker(W, { status: "running" });
+    await cut();
+    await hook(a, W, "Stop");
+    expect((await store.load(W))?.stop?.why).toBe("limit");
+    const { goOn } = api.limitOps;
+    expect(await goOn(W)).toBe("not-live");
+    t.spawn({ id: W, cwd: "/", args: [] });
+    const menu = { on: true };
+    (t as unknown as { dialogOn: (id: string) => Promise<boolean> }).dialogOn = async () => menu.on;
+    expect(await goOn(W)).toBe("dialog");
+    menu.on = false;
+    // Claude went on by itself after the reset: the session no longer ends with the limit line.
+    await ended();
+    expect(await goOn(W)).toBe("no-mark");
+    expect(t.typed).toEqual([]);
+    await cut();
+    expect(await goOn(W)).toBe("sent");
+    expect(t.typed).toEqual([{ id: W, data: pasteOf(continueText()) }, { id: W, data: "\r" }]);
+    await store.patch(W, { status: "running" });
+    expect(await goOn(W)).toBe("running");
+    await store.patch(W, { status: "idle", stop: undefined });
+    expect(await goOn(W)).toBe("no-mark");
+    await store.patch(W, { closedAt: 5 });
+    expect(await goOn(W)).toBe("gone");
+    expect(await goOn("cccccccc-1111-4111-8111-111111111111")).toBe("gone");
+    expect(t.typed).toHaveLength(2);
+    await a.close();
+  });
+
+  // The ticket keeps a row when the session file could not be read: "could not read" is not
+  // "no stop mark".
+  it("the ticket's stopRead: no session file is 'could not read'; a session with no mark, or with the limit, is read", async () => {
+    const { a, api } = await setUp();
+    await worker(W);
+    const rec = (await store.load(W))!;
+    expect(await api.limitOps.stopRead(rec)).toEqual({ ok: false });
+    await ended();
+    expect(await api.limitOps.stopRead(rec)).toEqual({ ok: true, stop: null });
+    await cut();
+    expect(await api.limitOps.stopRead(rec)).toMatchObject({ ok: true, stop: { why: "limit" } });
+    await a.close();
+  });
+
+  it("the ticket's logins: named as the console names them (no e-mail address), with their use", async () => {
+    const { a, api } = await setUp();
+    await writeFile(paths.defaultClaudeJson, JSON.stringify({ hasCompletedOnboarding: true }));
+    await writeFile(claudeJsonPath("work", paths), JSON.stringify({ oauthAccount: { emailAddress: "builder@example.com" } }));
+    const logins = await api.limitOps.logins();
+    expect(logins?.map((l) => [l.id, l.name, l.loggedIn, l.signedOut, l.use?.atLimit])).toEqual([
+      ["default", "Main login", true, false, true], ["work", "builder", true, false, false],
+    ]);
+    expect(JSON.stringify(logins)).not.toContain("@");
     await a.close();
   });
 });

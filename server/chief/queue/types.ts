@@ -2,7 +2,8 @@
 import { randomInt } from "node:crypto";
 import type { CheckRollup, PrStatus } from "../../gh/status.js";
 import { CONSOLE_AGENT_ID, type DeployInfo } from "../deploy/ticket.js";
-import type { ItemKind, QueueKind } from "../kinds.js";
+import { isAgentKind, type ItemKind, type QueueKind } from "../kinds.js";
+import type { LimitInfo } from "../limit/ticket.js";
 
 export type { ItemKind, QueueKind } from "../kinds.js";
 
@@ -41,6 +42,8 @@ export type QueueItem = {
   share?: { docId: string; link: string; at: number; device: string; checked: boolean };
   /** A `deploy` item only: what the console's own check found, and the run (spec §5.7). */
   deploy?: DeployInfo;
+  /** A `limit` item only: the agents that a usage limit blocks now, and the login to move them to (chief/limit). */
+  limit?: LimitInfo;
   /** A rule suggestion only ("Make this a rule?", brain/suggest.ts): the candidate rule it asks about. */
   rule?: { id: string };
   recommend?: { value: string; why: string; ruleIds: string[]; by: string; at: number };
@@ -64,11 +67,11 @@ export type QueueItem = {
   answerSeq: number;
 };
 
-// An item an agent made: not one of the console's own items (the `deploy` ticket and the rule
-// suggestions, agentId CONSOLE_AGENT_ID). Recommendations, auto answers, rule scopes, audit
-// lines and digest lines exist only for these (spec §5.7).
+// An item an agent made: not one of the console's own items (the `deploy` and `limit` tickets and
+// the rule suggestions, agentId CONSOLE_AGENT_ID). Recommendations, auto answers, rule scopes,
+// audit lines and digest lines exist only for these (spec §5.7).
 export type AgentItem = QueueItem & { kind: QueueKind };
-export const isAgentItem = (i: QueueItem): i is AgentItem => i.kind !== "deploy" && i.agentId !== CONSOLE_AGENT_ID;
+export const isAgentItem = (i: QueueItem): i is AgentItem => isAgentKind(i.kind) && i.agentId !== CONSOLE_AGENT_ID;
 // A "Make this a rule?" item of the console (brain/suggest.ts). Only the user answers it.
 export const isRuleSuggestion = (i: QueueItem): boolean => i.agentId === CONSOLE_AGENT_ID && i.kind === "choice" && typeof i.rule?.id === "string";
 // True for an item that shows images: a preview item, or a pr item that carries the screenshots

@@ -54,9 +54,19 @@ export function widgetsPrompt(dir: string): string {
   ].join("\n");
 }
 
+// Standing rules on token use (owner's order of 2026-11-26): every answer reads the whole
+// context again, so each line that enters it is paid again in each later answer.
+export const TOKEN_RULES = [
+  "## Token use",
+  "- Print only the last lines and the counts of a test run or a long command.",
+  "- Send no message that needs no action, and do not answer a plain notice.",
+  "- Send one message per step, not one per sub-step.",
+  '- A helper sub-agent for search, measuring or a mechanical check gets the model "haiku" or "sonnet".',
+].join("\n");
+
 // The whole system prompt of a non-master agent. spawn.ts (create) and
-// recovery.ts (relaunch) both call it, so they always agree. Repo agents keep
-// the Docs text (plus the issue text for kind "issue") in front of it.
+// recovery.ts (relaunch) both call it, so they always agree. Without the chief of
+// staff, repo agents keep the Docs text (plus the issue text for kind "issue") in front of it.
 export type ChiefPromptOpts = { brain: string; cli: string };
 
 // An agent with its own copy of the repo (strong protection, design B): no GitHub login there.
@@ -73,12 +83,12 @@ export function agentPrompt(
   chief?: ChiefPromptOpts,
 ): string {
   const widgets = widgetsPrompt(join(widgetsRoot, rec.id));
-  const docs = rec.repo ? repoAgentPrompt(chief && rec.kind === "issue" ? undefined : rec.kind) : "";
-  const withDocs = rec.repo ? `${docs}\n\n${widgets}` : widgets;
+  // With the chief of staff a page for the user goes in a ticket (queue paragraph): no Docs text.
+  const withDocs = rec.repo && !chief ? `${repoAgentPrompt(rec.kind)}\n\n${widgets}` : widgets;
   const base = rec.repo && rec.clone === true && chief ? `${withDocs}\n\n${clonePushPrompt(chief.cli, rec.baseBranch || "main")}` : withDocs;
-  // Chief of staff: base -> merge rule -> queue paragraph -> brain. The queue
+  // Chief of staff: base -> token rules -> merge rule -> queue paragraph -> brain. The queue
   // paragraph replaces ISSUE_AGENT_PROMPT for issue agents.
   if (!chief) return base;
-  const withQueue = `${base}\n\n${NO_MERGE_RULE}\n\n${queueAgentPrompt(chief.cli)}\n\n${remindAgentPrompt(chief.cli)}`;
+  const withQueue = `${base}\n\n${TOKEN_RULES}\n\n${NO_MERGE_RULE}\n\n${queueAgentPrompt(chief.cli)}\n\n${remindAgentPrompt(chief.cli)}`;
   return chief.brain !== "" ? `${withQueue}\n\n${brainPrompt(chief.brain)}` : withQueue;
 }

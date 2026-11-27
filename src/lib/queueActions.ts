@@ -32,6 +32,8 @@ export function planAction(a: QueueAction, c: Ctx): ActionPlan | null {
   // The console's own deploy ticket (chief spec §5.7): no key and no reply box ever answers or
   // starts it. Deploy is a button of its own (DeployPanel); here it can only be snoozed.
   if (f.kind === "deploy") return a.t === "snooze" ? { t: "snooze", item: f, minutes: c.snoozeMin } : null;
+  // The usage-limit ticket: its rows' buttons only (LimitPanel). No key answers or snoozes it.
+  if (f.kind === "limit") return null;
   switch (a.t) {
     case "approve":
       if (f.kind === "pr") return { t: "checkPr", item: f };

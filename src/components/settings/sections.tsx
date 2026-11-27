@@ -12,6 +12,8 @@ import { RulesSettings } from "./RulesSettings";
 import { LeadsSettings } from "./LeadsSettings";
 import { AccountsSettings } from "./AccountsSettings";
 import { ReposSettings } from "./ReposSettings";
+import { ModelSettings } from "./ModelSettings";
+import { DiamondIcon } from "../SideIcons";
 import { GitHubIcon, SendIcon } from "../SideIcons";
 import { TelegramSettings } from "./TelegramSettings";
 import { GitHubSettings } from "./GitHubSettings";
@@ -37,6 +39,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "leads", label: "Leads", group: "Agents", icon: <FlagIcon />, Body: LeadsSettings },
   { id: "accounts", label: "Claude accounts", group: "Agents", icon: <PersonIcon />, Body: AccountsSettings },
   { id: "repos", label: "Repos", group: "Agents", icon: <FolderIcon />, Body: ReposSettings },
+  { id: "model", label: "Model", group: "Agents", icon: <DiamondIcon />, Body: ModelSettings },
 
   // Add-ons (Telegram, GitHub) come here.
   { id: "telegram", label: "Telegram", group: "Add-ons", icon: <SendIcon />, Body: TelegramSettings },

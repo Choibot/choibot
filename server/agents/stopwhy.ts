@@ -106,21 +106,31 @@ export function stopOfTail(tail: string): StopWhy | null {
   return null;
 }
 
-// The same for a session file. Null also when the file cannot be read.
-export async function readStop(path: string): Promise<StopWhy | null> {
+// A read of the stop mark: ok false when the file could not be read (no file, a link, an error),
+// which is not the same as a file that has no mark (ok true, stop null).
+export type StopRead = { ok: true; stop: StopWhy | null } | { ok: false };
+
+// The same for a session file.
+export async function readStopFile(path: string): Promise<StopRead> {
   let t: Transcript | null = null;
   try {
     // Never through a link; with strong protection, read by the helper as the agent (sessionread.ts).
     t = await openTranscript(path);
-    if (!t) return null;
+    if (!t) return { ok: false };
     const size = t.facts.size;
     const from = Math.max(0, size - TAIL_BYTES);
-    return stopOfTail((await t.read(from, size - from)).toString("utf8"));
+    return { ok: true, stop: stopOfTail((await t.read(from, size - from)).toString("utf8")) };
   } catch {
-    return null;
+    return { ok: false };
   } finally {
     await t?.close();
   }
 }
 
-export { CONSOLE_MARK, consoleNote, goOnText } from "./consoleline.js";
+// The same, with null also when the file cannot be read.
+export async function readStop(path: string): Promise<StopWhy | null> {
+  const r = await readStopFile(path);
+  return r.ok ? r.stop : null;
+}
+
+export { CONSOLE_MARK, consoleNote, continueText, goOnText } from "./consoleline.js";

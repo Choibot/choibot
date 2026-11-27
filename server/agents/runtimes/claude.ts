@@ -7,6 +7,7 @@ import { isPersistentKind, type AgentRecord } from "../store.js";
 import type { AgentTask } from "../tasks.js";
 import { parseTaskFile, sortTasks } from "../tasks.js";
 import { buildHookSettings, hookToStatus } from "../hooks.js";
+import { compactSettings } from "../compact.js";
 import type { AgentRuntime, ArgOpts, PrepareCtx, PrepareResult, Preset } from "./types.js";
 import { accountDir, accountPaths, claudeAccountEnv, claudeJsonPath, isDefaultAccount, syncAccountDir, type AccountPaths } from "../accounts.js";
 import { CONSOLE_HOME_KINDS, trustClaudeDir } from "./claude-trust.js";
@@ -174,7 +175,8 @@ export const claudeRuntime: AgentRuntime = {
       const why = await ownFolderProblem(dirname(settingsPath));
       if (why) throw new Error(`[chief] ${rec.id}: the hook settings folder is refused: ${why}`);
     } else await mkdir(dirname(settingsPath), { recursive: true });
-    const settings = JSON.stringify(buildHookSettings({ agentId: rec.id, token: rec.hookToken, port: ctx.port }));
+    // The hooks, and where the session compacts its context (compact.ts).
+    const settings = JSON.stringify({ ...buildHookSettings({ agentId: rec.id, token: rec.hookToken, port: ctx.port }), ...compactSettings(rec.kind) });
     // Hardened (ruling 2c-7-a): the worktree or home is agent-writable, so a
     // planted symlink or hard link there is refused, never written through.
     // A persistent agent of the second account: mode 0640, so only the console and

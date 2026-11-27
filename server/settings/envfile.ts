@@ -26,6 +26,8 @@ export const WRITABLE_KEYS = [
   "FILES_REFUSED_EXTRA",
   // The share tool of "Share outside" (server/settings/share.ts): the absolute path of one program.
   "SHARE_TOOL",
+  // The model of an agent with none of its own (server/settings/model.ts): fable | opus | sonnet | haiku.
+  "AGENT_MODEL",
 ] as const;
 export type WritableKey = (typeof WRITABLE_KEYS)[number];
 

@@ -121,6 +121,28 @@ describe("spawnAgent", () => {
     }
   });
 
+  it("model: one alias is stored and passed as --model; none: the setting (opus when not set); a bad one or a codex agent: 400 and no record", async () => {
+    const t = await setup();
+    try {
+      const withModel = await spawnAgent(t.deps, { prompt: "x", model: " sonnet " });
+      const without = await spawnAgent(t.deps, { prompt: "x", model: "" });
+      vi.stubEnv("AGENT_MODEL", "haiku");
+      const onSetting = await spawnAgent(t.deps, { prompt: "x" });
+      vi.unstubAllEnvs();
+      if (!withModel.ok || !without.ok || !onSetting.ok) throw new Error("spawn failed");
+      expect((await t.store.load(withModel.id))!.model).toBe("sonnet");
+      expect("model" in (await t.store.load(without.id))!).toBe(false);
+      const args = (id: string) => t.spawned.find((x) => x.id === id)!.args;
+      expect(args(withModel.id).slice(0, 2)).toEqual(["--model", "sonnet"]);
+      expect(args(without.id).slice(0, 2)).toEqual(["--model", "opus"]);
+      expect(args(onSetting.id).slice(0, 2)).toEqual(["--model", "haiku"]);
+      for (const model of ["gpt-5", "claude-opus-5-5", 3]) {
+        expect(await spawnAgent(t.deps, { prompt: "x", model })).toEqual({ ok: false, code: 400, error: "model must be one of fable, opus, sonnet, haiku" });
+      }
+      expect(await spawnAgent(t.deps, { prompt: "x", model: "haiku", runtime: "codex" })).toEqual({ ok: false, code: 400, error: "model is for a Claude agent only" });
+      expect(await t.store.list()).toHaveLength(3);
+    } finally { await t.cleanup(); }
+  });
   it("rejects an unknown repo with 400 and leaves no record", async () => {
     const t = await setup();
     try {

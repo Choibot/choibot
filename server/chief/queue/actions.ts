@@ -427,6 +427,8 @@ export class QueueActions {
   // The user, or the item's own agent (spec §7).
   async withdraw(id: string, caller: Caller): Promise<ActionResult> {
     return this.locked(id, async (item) => {
+      // The console's own tickets (deploy, usage limit, a rule suggestion) have no agent: only the user.
+      if (!isAgentItem(item) && caller.level !== "user") return refuse(403, "only the user can withdraw a ticket of the console");
       const own = caller.level !== "none" && caller.agentId !== undefined && caller.agentId === item.agentId;
       if (caller.level !== "user" && !own) return refuse(403, "only the item's agent or the user can withdraw it");
       if (!isOpen(item)) return refuse(409, "item is not open", item);

@@ -15,7 +15,7 @@ export type NewItem = Omit<QueueItem, "id" | "createdAt" | "updatedAt" | "status
 
 export const ITEM_ID_RE = /^q[0-9a-z]{8}$/;
 const FILE_RE = /^(q[0-9a-z]{8})\.json$/;
-const KINDS = ["pr", "choice", "preview", "question", "deploy"] as const satisfies readonly QueueItem["kind"][];
+const KINDS = ["pr", "choice", "preview", "question", "deploy", "limit"] as const satisfies readonly QueueItem["kind"][];
 const STATUSES = ["open", "answered", "auto", "undone", "withdrawn", "snoozed"] as const satisfies readonly QueueItem["status"][];
 const NEW_ID_TRIES = 10;
 
@@ -53,6 +53,14 @@ const storedItem = obj({
       from: z.string(), to: z.string(), error: z.string().optional(), tail: z.string().optional(),
     }).optional(),
   }).optional(),
+  limit: obj({
+    rows: z.array(obj({
+      agentId: z.string(), key: z.string(), tag: z.string(), name: z.string(), login: z.string(), loginName: z.string(),
+      until: z.number().nullable(), room: z.boolean(), state: z.string(),
+    })),
+    to: obj({ id: z.string(), name: z.string() }).optional(),
+    quietAt: z.number().optional(),
+  }).optional(),
   rule: obj({ id: z.string() }).optional(),
   recommend: obj({ value: z.string(), why: z.string(), ruleIds: z.array(z.string()), by: z.string(), at: z.number() }).optional(),
   answer: answerShape.optional(), history: z.array(answerShape),
@@ -64,7 +72,8 @@ const storedItem = obj({
 }).refine((i) => (i.kind !== "pr" || i.pr !== undefined)
   && (i.kind !== "choice" || i.choice !== undefined)
   && (i.kind !== "preview" || i.preview !== undefined)
-  && (i.kind !== "deploy" || i.deploy !== undefined));
+  && (i.kind !== "deploy" || i.deploy !== undefined)
+  && (i.kind !== "limit" || i.limit !== undefined));
 
 function isItem(v: unknown, id: string): v is QueueItem {
   return storedItem.safeParse(v).success && (v as QueueItem).id === id;
