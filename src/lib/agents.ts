@@ -12,6 +12,8 @@ export type AgentSession = {
   startedOn?: { from: string; until: number | null };
   // Chief (spec §13): the agent id that spawned this one (a lead's workers carry the lead id).
   spawnedBy?: string;
+  // The model of its last start (server/agents/store.ts runModel), and its own pick.
+  runModel?: string; model?: string;
 };
 export type RepoInfo = { name: string; path: string; branch: string };
 export type ChangedFile = {
@@ -124,6 +126,35 @@ export async function deleteAgent(id: string): Promise<boolean> {
 // server deletes it 7 days later. Reopen moves it back.
 export async function closeAgent(id: string): Promise<boolean> {
   const r = await chiefFetch(`/api/agents/${id}/close`, { method: "POST" }); return r.ok;
+}
+// A new title for an agent (its label in the list). The answer: null, or the one line that
+// says why not (the server's refusal, the pairing sentence, or "failed (500)").
+export async function renameAgent(id: string, title: string): Promise<string | null> {
+  const r = await chiefFetch(`/api/agents/${id}/rename`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ title }) });
+  if (r.ok) return null;
+  const body = await r.json().catch(() => ({}));
+  return refusalSentence(r.status, body, "Renaming an agent") ?? body.error ?? `failed (${r.status})`;
+}
+// The model an agent runs on: the --model of its last start, else its own pick. When the console
+// does not know it (an agent of before runModel that has no pick, a Codex agent): none, no guess.
+export function agentModel(a: { runModel?: string; model?: string }): string | undefined {
+  return a.runModel ?? a.model;
+}
+// The model in short: "opus", "opus-5-5" for "claude-opus-5-5". The list row shows only this.
+export function modelWord(model: string | undefined): string | undefined {
+  return model ? model.replace(/^claude-/, "") : undefined;
+}
+// The login of an agent when it is not the default one.
+export function loginOf(account: string | undefined): string | undefined {
+  return account && account !== "default" ? account : undefined;
+}
+// The quiet tag of a header: the model in short, then the login: "opus · @choibot". The row's tag is
+// the model only (the title gets the room); its hover text keeps this `title`.
+export function modelTag(model: string | undefined, account?: string): { text: string; title: string } | null {
+  const login = loginOf(account);
+  const text = [modelWord(model), login && `@${login}`].filter(Boolean).join(" · ");
+  if (!text) return null;
+  return { text, title: [model && `Model: ${model}`, login && `Claude account: ${login}`].filter(Boolean).join(" · ") };
 }
 export async function reopenAgent(id: string): Promise<boolean> {
   const r = await chiefFetch(`/api/agents/${id}/reopen`, { method: "POST" }); return r.ok;

@@ -26,6 +26,7 @@ import { isClone } from "./agentclone.js";
 import type { ChiefWait } from "../chief/chiefwait.js";
 import type { LoginHold } from "./loginhold.js";
 import { hostOf } from "./host.js";
+import { headless } from "./headless/wiring.js";
 
 // The Claude transcript helpers moved into the Claude runtime adapter;
 // re-exported here so existing imports keep working.
@@ -103,7 +104,8 @@ async function masterPreset(rec: AgentRecord, chief?: ChiefPromptOpts): Promise<
 // ("resumed") or cold-starting in the worktree when it isn't ("cold").
 // `prompt` is submitted as the first turn of the relaunched session (a new
 // prompt sent to a stopped closed agent). It is not used when the session is
-// still alive.
+// still alive. With no `prompt`, a start with no session to resume sends the
+// agent's kept first message (firstPrompt, store.ts): Claude never took it in.
 export async function resumeAgent(
   rec: AgentRecord,
   ctx: RecoveryCtx,
@@ -112,6 +114,9 @@ export async function resumeAgent(
   const t = hostOf(rec.id) ?? ctx.terminals;
   if (t.has(rec.id)) return "alive";
   if (await t.reattach(rec.id)) return "alive";
+  // A headless worker (headless/wiring.ts) with the flag off: nothing is prepared or started.
+  const hw = rec.host === "headless" ? headless() : null;
+  if (rec.host === "headless" && !hw) throw new Error(`${rec.id} is a headless worker, and headless workers are off (AGENT_HEADLESS)`);
   // A persistent agent of the second account waits for that account's sign-in (chief/
   // chiefwait.ts): no session starts, and its record keeps its status.
   if (ctx.chiefWait && !(await ctx.chiefWait.mayStart(rec.id))) return "waits";
@@ -178,18 +183,39 @@ export async function resumeAgent(
   }
 
   const canResume = await runtime.canResume(rec, cwd);
+  // A cold start of a Claude agent before its first turn: the task goes in again (a resume has
+  // it in its session). Never for Codex or a headless worker (store.ts firstPrompt).
+  const resend = opts.prompt === undefined && !canResume && runtime.id === "claude" && !hw && rec.firstPrompt !== undefined;
+  const prompt = opts.prompt ?? (resend ? rec.firstPrompt : undefined);
   // The model (model.ts startModel), also on a resume: a resumed session keeps the model it was
   // saved on unless --model says another (code.claude.com/docs/en/model-config).
   const model = runtime.id === "claude" && !preset.model ? startModel(rec, { fresh: !canResume }) : undefined;
+  // runModel: the model of this start (the --model passed). None passed (a resumed lead or master
+  // session): the field stays, as the session goes on on the model it was saved on.
+  const runModel = preset.model ?? model;
+  // A headless worker (headless/wiring.ts) starts again headless; the prompt is its first message.
+  if (hw) {
+    const args = runtime.buildArgs(
+      model ? { ...preset, model } : preset,
+      { settingsPath, resume: canResume ? rec.sessionId! : undefined, cwd, promptSnapshotOff: chief },
+    );
+    await hw.launch(rec.id, { cwd, args, command: runtime.bin(), env, settingsPath });
+    await ctx.store.patch(rec.id, { status: "idle", chiefRev: chief ? CHIEF_PROMPT_REV : undefined, ...(runModel ? { runModel } : {}) });
+    await hw.first(rec.id, opts.prompt);
+    return canResume ? "resumed" : "cold";
+  }
   const args = runtime.buildArgs(
     model ? { ...preset, model } : preset,
-    { settingsPath, resume: canResume ? rec.sessionId! : undefined, cwd, prompt: opts.prompt, promptSnapshotOff: chief },
+    { settingsPath, resume: canResume ? rec.sessionId! : undefined, cwd, prompt, promptSnapshotOff: chief },
   );
-  ctx.terminals.spawn({ id: rec.id, cwd, args, command: runtime.bin(), env, persist: true });
+  const bin = runtime.bin();
+  ctx.terminals.spawn({ id: rec.id, cwd, args, command: bin, env, persist: true, helperLaunch: runtime.helperLaunch?.(bin, args) });
   // Comes up idle, waiting for input; UserPromptSubmit flips it to running.
   // chiefRev rides in the same write: set when launched with the identity env,
   // cleared (undefined is dropped by JSON) when launched without it.
-  await ctx.store.patch(rec.id, { status: "idle", chiefRev: chief ? CHIEF_PROMPT_REV : undefined });
+  await ctx.store.patch(rec.id, {
+    status: "idle", chiefRev: chief ? CHIEF_PROMPT_REV : undefined, ...(runModel ? { runModel } : {}), ...(resend ? { firstPromptAt: Date.now() } : {}),
+  });
   return canResume ? "resumed" : "cold";
 }
 

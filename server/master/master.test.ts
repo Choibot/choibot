@@ -161,7 +161,8 @@ describe("ensureFleetMaster homes", () => {
     await ensureFleetMaster({ store, recoveryCtx: ctx, masterDataDir });
     // resumeAgent's own status patch only: the ensure itself writes no field.
     expect(patch.mock.calls.length).toBeGreaterThan(0);
-    expect(patch.mock.calls.map(([, f]) => Object.keys(f).sort())).toEqual(patch.mock.calls.map(() => ["chiefRev", "status"]));
+    // (runModel: the --model of a fresh start, the console's setting.)
+    expect(patch.mock.calls.map(([, f]) => Object.keys(f).filter((k) => k !== "runModel").sort())).toEqual(patch.mock.calls.map(() => ["chiefRev", "status"]));
     expect(await readdir(root)).toEqual([]);
   });
 });

@@ -8,6 +8,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { z } from "zod";
 import { resumeAgent, waitUntilGone, type RecoveryCtx } from "../agents/recovery.js";
+import { hostOf } from "../agents/host.js";
 import { pick } from "../agents/runtimes/index.js";
 import { isPersistentKind, type AgentRecord, type SessionStore } from "../agents/store.js";
 import type { TerminalManager } from "../agents/terminal.js";
@@ -85,8 +86,9 @@ export async function relaunchForChief(
       // Hold the inbox: the new TUI takes no paste before its SessionStart.
       if (isPersistentKind(rec.kind)) ctx.onRelaunch(rec);
       killed = true;
-      ctx.terminals.kill(id);
-      const gone = await (ctx.waitGone ? ctx.waitGone(id) : waitUntilGone(ctx.terminals, id));
+      const t = hostOf(id) ?? ctx.terminals;
+      t.kill(id);
+      const gone = await (ctx.waitGone ? ctx.waitGone(id) : waitUntilGone(t, id));
       if (!gone) return { outcome: "failed", error: "the running session did not end" };
       // removeAgent takes no typing lock: a delete during the kill must not
       // start a session that has no record.
@@ -119,8 +121,9 @@ export function restartSession(id: string, ctx: ChiefRelaunchCtx): Promise<Relau
     ctx.relaunching.add(id);
     try {
       ctx.onRelaunch(rec);
-      ctx.terminals.kill(id);
-      const gone = await (ctx.waitGone ? ctx.waitGone(id) : waitUntilGone(ctx.terminals, id));
+      const t = hostOf(id) ?? ctx.terminals;
+      t.kill(id);
+      const gone = await (ctx.waitGone ? ctx.waitGone(id) : waitUntilGone(t, id));
       if (!gone) return { outcome: "failed", error: "the running session did not end" };
       const cur = await ctx.store.load(id);
       if (!cur) return { outcome: "gone" };

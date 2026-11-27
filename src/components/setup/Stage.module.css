@@ -1,0 +1,110 @@
+/* src/components/setup/Stage.module.css — the stage of the Set-up page (direction B): the rail,
+   one step in the middle, the fold "All steps" under it. Tokens only (globals.css). */
+.stage {
+  flex: 1 0 auto; display: flex; flex-direction: column; gap: 18px; width: 100%; max-width: 640px; margin: 0 auto;
+  padding: 20px 24px 32px; color: var(--ink-0); font-family: var(--font-sans); font-size: var(--text-sm); line-height: 1.45;
+}
+.stage[data-phone] { flex: none; max-width: none; padding: 0; gap: 16px; }
+
+/* The rail: one part for each required step. The fill moves on scaleX; the part of the step to
+   do now is a shade lighter. */
+.top { display: grid; gap: 4px; }
+.rail { display: flex; gap: 3px; }
+.rail i { position: relative; flex: 1; height: 3px; border-radius: 2px; overflow: hidden; background: var(--bg-3); transition: background-color 280ms cubic-bezier(.2, 0, 0, 1); }
+.rail i[data-state="cur"] { background: var(--ink-2); }
+.rail b {
+  position: absolute; inset: 0; background: var(--ink-1); transform: scaleX(0); transform-origin: left center;
+  transition: transform 280ms cubic-bezier(.2, 0, 0, 1);
+}
+.rail i[data-state="done"] b { transform: scaleX(1); }
+.rail[data-still] i, .rail[data-still] b { transition: none; }
+@media (prefers-reduced-motion: reduce) { .rail i, .rail b { transition: none; } }
+.line { display: flex; align-items: center; gap: 10px; min-height: 22px; padding-top: 5px; }
+.lineText { flex: 1; min-width: 0; color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* The middle: the card of one step, in the centre of the page on a desktop, at the top on the
+   phone. The frame gives the leaving card room to move while the fold clips it. */
+.area { flex: 1 0 auto; display: flex; flex-direction: column; justify-content: center; scroll-margin-top: 16px; }
+.stage[data-phone] .area { justify-content: flex-start; }
+.frame { margin: -32px 0; }
+.framePart { padding: 32px 0; }
+.swap { display: grid; align-items: start; }
+.cell { grid-area: 1 / 1; min-width: 0; }
+.cell[data-gone] { pointer-events: none; }
+.stage .card { gap: 10px; padding: 14px 16px 16px; border: 1px solid var(--line); border-radius: 10px; background: var(--bg-1); }
+.stage[data-phone] .card { padding: 14px; }
+.cardHead { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
+.cardTitle { flex: 1; min-width: 0; margin: 0; color: var(--ink-0); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.cardWord { flex: none; color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
+.stage[data-phone] .cardTitle { font-size: var(--text-phone-body); }
+
+/* The end card. */
+.endTitle { display: flex; align-items: center; gap: 9px; margin: 0; color: var(--ink-0); font-size: var(--text-base); font-weight: var(--weight-semibold); }
+.endMark { flex: none; display: grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: var(--ok); color: var(--bg-1); }
+.end { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.options { margin: 0; padding: 0; list-style: none; }
+.options li + li { border-top: 1px solid var(--line); }
+.option, .row {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 34px; padding: 0 2px; border: 0; background: none;
+  color: inherit; font: inherit; text-align: left;
+}
+button.option, button.row { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+@media (hover: hover) { button.option:hover, button.row:hover { background: var(--bg-2); } }
+button.option:focus-visible, button.row:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: -1.5px; }
+.option > span:first-child, .row > span:first-child { transform: scale(0.78); margin: 0 -2px; }
+.optTitle, .rowTitle { flex: 1; min-width: 0; color: var(--ink-0); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.note { flex: none; max-width: 50%; color: var(--ink-2); font-size: var(--text-xs); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: right; }
+.tag { flex: none; padding: 0 8px; border: 1px solid var(--line-2); border-radius: 999px; color: var(--ink-0); font-size: 11px; line-height: 18px; }
+.groupHead { margin: 6px 0 0; color: var(--ink-2); font-size: 11px; font-weight: var(--weight-medium); }
+
+/* "All steps": the full list in a fold under the stage. */
+.all { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; }
+.allBtn {
+  display: inline-flex; align-items: center; gap: 6px; height: 28px; padding: 0 8px; border: 0; border-radius: var(--radius-sm); background: none;
+  color: var(--ink-2); font: inherit; font-size: var(--text-xs); cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) { .allBtn:hover { color: var(--ink-1); } }
+.allBtn:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
+.allFrame { width: 100%; }
+/* A grid column takes the width of its widest line by default; the rows do not wrap, so the
+   column is held to the page and the long notes end in "…". */
+.allBody { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; padding-top: 6px; }
+.rows { margin: 0; padding: 0; list-style: none; }
+.rows li { border-bottom: 1px solid var(--line); }
+.rows .row { min-height: 30px; }
+.rows li[aria-current] .rowTitle { font-weight: var(--weight-medium); }
+.rows li[data-state="waits"] .rowTitle, .rows li[data-state="checking"] .rowTitle { color: var(--ink-1); }
+
+/* Phone: touch sizes. */
+.stage[data-phone] .line { padding-top: 6px; }
+.stage[data-phone] .lineText, .stage[data-phone] .allBtn { font-size: var(--text-phone-sm); }
+.stage[data-phone] .option, .stage[data-phone] .row { min-height: 44px; font-size: var(--text-phone-body); }
+.stage[data-phone] .note { font-size: var(--text-phone-sm); }
+.stage[data-phone] .allBtn { height: 40px; }
+
+/* The guide: a switch at the right of the line, a column next to the stage on a wide page, a
+   sheet from the bottom on a narrow page and on the phone. */
+.pill {
+  flex: none; display: inline-flex; align-items: center; height: 20px; padding: 0 9px; border: 1px solid var(--line); border-radius: 999px;
+  background: none; color: var(--ink-1); font: var(--weight-medium) 11px/18px var(--font-sans); cursor: pointer;
+  touch-action: manipulation; -webkit-tap-highlight-color: transparent;
+}
+@media (hover: hover) { .pill:hover { color: var(--ink-0); border-color: var(--line-2); } }
+.pill[aria-pressed="true"] { background: var(--bg-2); color: var(--ink-0); border-color: var(--line-2); }
+.pill:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
+.body { position: relative; flex: 1; min-height: 0; display: flex; }
+.main { flex: 1; min-width: 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
+.side { flex: none; width: 400px; min-height: 0; display: flex; border-left: 1px solid var(--line); background: var(--bg-0); }
+.scrim { position: absolute; inset: 0; z-index: 2; border: 0; padding: 0; background: color-mix(in srgb, var(--bg-0) 55%, transparent); cursor: default; }
+.sheet {
+  position: absolute; left: 0; right: 0; bottom: 0; z-index: 3; height: 85%; display: flex; flex-direction: column;
+  border-top: 1px solid var(--line-2); border-radius: 12px 12px 0 0; background: var(--bg-1); overflow: hidden;
+  animation: stageSheetIn 260ms cubic-bezier(.2, 0, 0, 1);
+}
+@keyframes stageSheetIn { from { transform: translateY(24px); opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .sheet { animation: none; } }
+.sheetHead { flex: none; display: flex; align-items: center; justify-content: space-between; gap: 10px; height: 44px; padding: 0 8px 0 16px; border-bottom: 1px solid var(--line); }
+.sheetHead b { font-size: var(--text-sm); font-weight: var(--weight-semibold); }
+.phonePage { position: relative; }
+.phoneBar { flex: none; display: flex; justify-content: flex-end; padding: 8px 16px max(8px, env(safe-area-inset-bottom, 0px)); border-top: 1px solid var(--line); background: var(--bg-0); }
+.phoneBar .pill { height: 32px; padding: 0 14px; font-size: var(--text-phone-sm); }

@@ -36,6 +36,8 @@ import { DeployPanel } from "./DeployPanel";
 import { LimitPanel } from "./LimitPanel";
 import { askMerge, MergeButton, MergeHooksContext, MergeLine, MoreMenu, useMergeOff, type MoreItem } from "./QueueMerge";
 import { recentDeployed } from "../lib/deploy";
+import { endedPressTicket, updateTracker } from "../lib/updateProgress";
+import { useUpdatePress } from "../lib/useUpdateProgress";
 import { appendTranscript, browserSpeech, pushToTalk, type PushToTalk, type VoiceView } from "../lib/voice";
 import { linkParts } from "../lib/linkify";
 import { MESSAGE_PURIFY, renderMessageMarkdown } from "../lib/markdown";
@@ -174,17 +176,30 @@ export function QueueView({ q, onOpenAgent, onExit }: { q: UseQueue; onOpenAgent
   const readOnly = q.state.readOnly;
   // The peeked ticket, while it is not an Open row. A change in flight (an undo that the server
   // has not taken yet) does not count: if it fails, the ticket is closed again and the peek stays.
-  const peekOpen = peekId !== null && !q.state.pending[peekId] && open.some((i) => i.id === peekId);
+  // The update ticket of this page's press closed with its end while the pane showed it: the pane
+  // keeps it (a peek from this render on, so the next row never flashes in its place).
+  const updatePress = useUpdatePress();
+  const shownBefore = useRef<string | null | undefined>(undefined);
+  const autoPeek = peekId === null && on ? endedPressTicket(updatePress, q.state.items, shownBefore.current) : null;
+  const peekNow = peekId ?? autoPeek;
+  const peekOpen = peekNow !== null && !q.state.pending[peekNow] && open.some((i) => i.id === peekNow);
   const peekFrom = useRef<string | null>(null); // the selected open row when the peek began
-  const peekItem = peekId !== null ? q.state.items.find((i) => i.id === peekId) : undefined;
+  const peekItem = peekNow !== null ? q.state.items.find((i) => i.id === peekNow) : undefined;
   const peeked = on && !peekOpen ? peekItem : undefined;
   const shown = peeked ?? focused; // the ticket in the reading pane
   // One screen at a time (isMobile): the ticket screen shows the open ticket the user opened, or a peek.
   const sheetItem = isMobile ? peeked ?? (focused && focused.id === sheetId ? focused : null) : null;
+  if (on) shownBefore.current = (isMobile ? sheetItem : shown)?.id ?? null;
+  useEffect(() => {
+    if (autoPeek === null) return;
+    peekFrom.current = live.current.state.focusId;
+    setPeekId(autoPeek);
+    updateTracker().note({ peeked: true });
+  }, [autoPeek]);
   // The answer keys act on the selected open row. They are off while that row is not the ticket
   // on screen: a peek shows another ticket, or the one-screen layout shows the list.
   const keysOff = useRef(false);
-  keysOff.current = peekId !== null || (isMobile && !sheetItem);
+  keysOff.current = peekNow !== null || (isMobile && !sheetItem);
 
   // The view's own width decides between two panes and one screen (measured before the first paint).
   useLayoutEffect(() => {

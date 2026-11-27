@@ -136,6 +136,30 @@ describe("agents api", () => {
     await cleanup();
   });
 
+  it("POST /api/agents: a title becomes the label; a bad title is refused before a spawn", async () => {
+    const { workspaceDir, repo, cleanup } = await makeWorkspaceWithRepo();
+    const app = Fastify();
+    const terminals = fakeTerminals();
+    registerAgentApi(app, {
+      terminals: terminals as any, store, hub: new EventHub(),
+      workspaceDir, worktreeRoot: join(workspaceDir, ".wt"),
+    });
+    const res = await app.inject({ method: "POST", url: "/api/agents", payload: { repo, title: "  Worker titles ", prompt: "You are a worker of the lead. Do X." } });
+    expect(res.statusCode).toBe(202);
+    const rec = await store.load(res.json().id as string);
+    expect(rec?.label).toBe("Worker titles");
+    // The model of the start, for the list's tag (the console's setting: opus when not set).
+    expect(rec?.runModel).toBe("opus");
+    const before = (await store.list()).length;
+    for (const [title, error] of [["t".repeat(41), "title is 41 characters; the most is 40"], ["a\nb", "title must be one line"], ["", "title must not be empty"], [3, "title must be text"]] as const) {
+      const bad = await app.inject({ method: "POST", url: "/api/agents", payload: { repo, title, prompt: "go" } });
+      expect(bad.statusCode).toBe(400);
+      expect(bad.json().error).toBe(error);
+    }
+    expect((await store.list()).length).toBe(before);
+    await cleanup();
+  });
+
   it("cleans the record, worktree, and branch when agent spawn fails", async () => {
     const { workspaceDir, repo, cleanup } = await makeWorkspaceWithRepo();
     const terminals = fakeTerminals();

@@ -7,6 +7,7 @@ import type { AgentRecord } from "../agents/store.js";
 import { sendToAgent, type ReplyTerminals } from "../issues/reply.js";
 import { oneLine } from "../text.js";
 import { WidgetError } from "./errors.js";
+import { TOO_LARGE_TEXT } from "../agents/host.js";
 import { LIMITS } from "./paths.js";
 
 export const TYPE_INTERVAL_MS = 10_000;
@@ -58,13 +59,14 @@ export class AgentTyper {
     this.check(rec, wid);
     const key = `${rec.id}/${wid}`;
     this.last.set(key, this.now()); // taken before the await: a parallel call gets 429
-    let ok = false;
+    let r: Awaited<ReturnType<typeof sendToAgent>> | undefined;
     try {
       // "not-live" and "starting" both answer the 409 below.
-      ok = (await sendToAgent(this.d.terminals, rec.id, text, this.d.sleep, { checkReady: this.d.checkReady })) === "sent";
+      r = await sendToAgent(this.d.terminals, rec.id, text, this.d.sleep, { checkReady: this.d.checkReady });
     } finally {
-      if (!ok) this.last.delete(key);
+      if (r !== "sent") this.last.delete(key);
     }
-    if (!ok) throw new WidgetError(409, "agent not running");
+    if (r === "too-large") throw new WidgetError(413, TOO_LARGE_TEXT);
+    if (r !== "sent") throw new WidgetError(409, "agent not running");
   }
 }

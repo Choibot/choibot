@@ -91,6 +91,7 @@
 .howtoBody p { margin: 0; }
 .tagOff { background: none; border: 1px solid var(--line-2); color: var(--ink-2); }
 .note { margin: 6px 2px 0; color: var(--ink-2); font-size: var(--text-xs); }
+.update { margin: 8px 2px 0; color: var(--ink-1); font-size: var(--text-sm); line-height: 1.45; }
 .note a { color: var(--ink-1); text-underline-offset: 2px; }
 .note code, .help code { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-1); }
 .err { margin: 6px 2px 0; color: var(--err); font-size: var(--text-xs); }

@@ -57,9 +57,20 @@ export type GuideDeps = {
   model: GuideModel;
   // When the Claude plan comes back, if the console knows.
   limitUntil?: () => Promise<number | null>;
+  // The ChoiBot GitHub app is on: "Connect GitHub" and "Pick a repo" are one step on the page
+  // (src/lib/setup.ts oneGithubStep), so the count of the welcome counts them as one.
+  githubApp?: boolean;
   now?: () => number;
   log?: (s: string) => void;
 };
+
+// The steps that the count of the welcome counts: the same number as the page (one count). With
+// the ChoiBot app, "Connect GitHub" and "Pick a repo" are one step, done when both are done.
+export function countedSteps(main: StepStatus[], githubApp: boolean): StepStatus[] {
+  const repo = main.find((s) => s.id === "repo");
+  if (!githubApp || !repo || !main.some((s) => s.id === "github")) return main;
+  return main.filter((s) => s.id !== "repo").map((s) => (s.id === "github" && s.state === "done" && repo.state !== "done" ? { ...s, state: repo.state } : s));
+}
 
 export type SayResult =
   | { ok: true }
@@ -189,8 +200,9 @@ export class Guide {
       const told = this.told;
 
       if (!told.started) {
-        const left = main.length - main.filter((s) => s.state === "done").length;
-        const count = `${main.length - left} of ${main.length} steps ${main.length - left === 1 ? "is" : "are"} done.`;
+        const counted = countedSteps(main, this.d.githubApp === true);
+        const left = counted.length - counted.filter((s) => s.state === "done").length;
+        const count = `${counted.length - left} of ${counted.length} steps ${counted.length - left === 1 ? "is" : "are"} done.`;
         await this.add({ kind: "guide", fixed: true, text: over
           ? `Welcome. This is your ${DISPLAY_NAME}, and I am the guide. The set-up is done. Ask me how something works, or what to set up next.`
           : `Welcome. This is your ${DISPLAY_NAME}, and I am the guide. ${count} ${left === 1 ? "1 step is" : `${left} steps are`} left.\nYou can also do each step from the list. It works without me.` });

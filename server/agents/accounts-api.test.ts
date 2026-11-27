@@ -15,6 +15,7 @@ import type { AgentRecord } from "./store.js";
 import { claudeJsonPath } from "./accounts.js";
 import { continueText } from "./consoleline.js";
 import { pasteOf } from "../issues/reply.js";
+import { endHeadless, initHeadless } from "./headless/wiring.js";
 
 type SpawnCall = { id: string; cwd: string; args: string[]; command?: string; env?: Record<string, string> };
 
@@ -802,6 +803,80 @@ describe("an agent and a Claude login at its limit", () => {
     await a.close();
   });
 
+  // The live fault (hosted console, release 861): agent 1 was killed and started again before
+  // its first turn, with no task in its argv. The kept first message goes again until Claude takes
+  // it in; never to a page.
+  it("a move before the first turn starts the agent again with its first message; after the first turn, without", async () => {
+    const { a, t } = await setUp({ usage: NONE_FULL });
+    const id = (await a.inject({ method: "POST", url: "/api/agents", payload: { prompt: "do the first task" } })).json().id as string;
+    expect(t.spawned).toHaveLength(1);
+    expect(t.spawned[0].args.at(-1)).toBe("do the first task");
+    expect((await store.load(id))?.firstPrompt).toBe("do the first task");
+    expect((await a.inject({ method: "GET", url: `/api/agents/${id}` })).json()).not.toHaveProperty("firstPrompt");
+    expect((await a.inject({ method: "GET", url: "/api/agents" })).json().sessions[0]).not.toHaveProperty("firstPrompt");
+    // The hooks of a made agent carry its own token.
+    const realHook = async (event: string) => {
+      const token = (await store.load(id))!.hookToken;
+      const r = await a.inject({ method: "POST", url: `/api/agents/${id}/hook?token=${token}`, payload: { hook_event_name: event, session_id: SID } });
+      expect(r.statusCode).toBeLessThan(300);
+    };
+    // Claude made a session but took no message in (it stopped at a screen), and the user moves it.
+    await realHook("SessionStart");
+    expect((await store.load(id))?.sessionId).toBe(SID);
+    await a.inject({ method: "POST", url: `/api/agents/${id}/account`, payload: { account: "work" } });
+    expect(t.spawned).toHaveLength(2);
+    expect(t.spawned[1].args.at(-1)).toBe("do the first task");
+    // Claude takes it in: the kept message is gone, and the next cold start has no task to send.
+    await realHook("UserPromptSubmit");
+    expect((await store.load(id))?.firstPrompt).toBeUndefined();
+    await a.inject({ method: "POST", url: `/api/agents/${id}/account`, payload: { account: "default" } });
+    expect(t.spawned).toHaveLength(3);
+    expect(t.spawned[2].args).not.toContain("do the first task");
+    await a.close();
+  });
+
+  // Two hooks at the same time (SessionStart and UserPromptSubmit): store.patch loads, changes and
+  // saves with no lock, so the older save can bring the message back. Stop (only after a turn)
+  // clears it too.
+  it("the kept first message: UserPromptSubmit alone clears it; Stop clears it too, also after a save brought it back", async () => {
+    const { a } = await setUp({ usage: NONE_FULL });
+    const make = async () => (await a.inject({ method: "POST", url: "/api/agents", payload: { prompt: "do the first task" } })).json().id as string;
+    const hook = async (id: string, event: string) => {
+      const token = (await store.load(id))!.hookToken;
+      const r = await a.inject({ method: "POST", url: `/api/agents/${id}/hook?token=${token}`, payload: { hook_event_name: event, session_id: SID } });
+      expect(r.statusCode).toBeLessThan(300);
+    };
+    const kept = async (id: string) => { const r = (await store.load(id))!; return [r.firstPrompt, typeof r.firstPromptAt]; };
+
+    const one = await make();
+    expect(await kept(one)).toEqual(["do the first task", "number"]);
+    expect((await a.inject({ method: "GET", url: `/api/agents/${one}` })).json()).not.toHaveProperty("firstPromptAt");
+    await hook(one, "UserPromptSubmit");
+    expect(await kept(one)).toEqual([undefined, "undefined"]);
+
+    const two = await make();
+    await hook(two, "UserPromptSubmit");
+    const stale = (await store.load(two))!;
+    await store.save({ ...stale, firstPrompt: "do the first task", firstPromptAt: 1 }); // the older save of SessionStart
+    await hook(two, "Stop");
+    expect(await kept(two)).toEqual([undefined, "undefined"]);
+    await a.close();
+  });
+
+  it("an agent that waited for a login keeps its first message after its start, until Claude takes it in", async () => {
+    const { a, t, api, state } = await setUp({ usage: ALL_FULL });
+    const id = (await a.inject({ method: "POST", url: "/api/agents", payload: { prompt: "do the first task" } })).json().id as string;
+    expect((await store.load(id))?.firstPrompt).toBeUndefined();   // the wait keeps it (waitsLogin)
+    state.usage = ONE_FULL;
+    await api.checkWaiting();
+    expect(t.spawned).toHaveLength(1);
+    expect((await store.load(id))?.firstPrompt).toBe("do the first task");
+    await a.inject({ method: "POST", url: `/api/agents/${id}/account`, payload: { account: "default" } });
+    expect(t.spawned).toHaveLength(2);
+    expect(t.spawned[1].args.at(-1)).toBe("do the first task");
+    await a.close();
+  });
+
   it("each login has room: a new agent starts on the default login with no note", async () => {
     const { a } = await setUp({ usage: NONE_FULL });
     const res = await a.inject({ method: "POST", url: "/api/agents", payload: { prompt: "hi" } });
@@ -843,6 +918,67 @@ describe("an agent and a Claude login at its limit", () => {
     expect(await goOn("cccccccc-1111-4111-8111-111111111111")).toBe("gone");
     expect(t.typed).toHaveLength(2);
     await a.close();
+  });
+
+  // A headless worker has no Continue of its own: the console's go-on (the ticket's button or the
+  // auto-continue, headless/wiring.ts continueOne) goes one time. Whichever goes first, the other
+  // one reads "running" and sends nothing; a terminal worker is as before.
+  it("a headless worker: the ticket's Continue and the auto-continue never both go on", async () => {
+    const { a, t, api } = await setUp({ usage: NONE_FULL });
+    let clock = 1_000_000;
+    const hdir = join(base, "headless");
+    const logs: string[] = [];
+    const hw = initHeadless({
+      agentEnv: () => ({}), onExit: () => {}, load: (id) => store.load(id), postHook: async () => {}, tellUser: () => {},
+      host: { runDir: join(hdir, "run"), stateDir: join(hdir, "state"), unitPrefix: `accounts-api-${process.pid}-` },
+      now: () => clock, log: (l) => logs.push(l),
+    });
+    try {
+      // W's run folder: the headless host owns W (hostOf(W) is the seam); its program is live.
+      await mkdir(join(hdir, "run", W), { recursive: true });
+      const sent: string[] = [];
+      vi.spyOn(hw.host, "has").mockImplementation((id) => id === W);
+      vi.spyOn(hw.host, "send").mockImplementation(async (id, text) => { sent.push(`${id} ${text}`); return "sent"; });
+      const { goOn } = api.limitOps;
+      const auto = () => hw.continueOne(api.limitOps);
+      await worker(W, { status: "running", host: "headless" });
+      await cut();
+      await hook(a, W, "Stop");
+      expect((await store.load(W))?.stop?.why).toBe("limit");
+      // 1. The ticket's Continue first, then the auto-continue's tick: one line.
+      expect(await goOn(W)).toBe("sent");
+      expect(sent).toEqual([`${W} ${continueText()}`]);
+      expect(await auto()).toBe(W);
+      expect(logs.at(-1)).toContain("go-on: running");
+      expect(sent).toHaveLength(1);
+      // 2. Later (the guard and the auto-continue's retry window are over; the limit stops it
+      // again): the auto-continue first, then the ticket's Continue: one line.
+      clock += 11 * 60_000;
+      expect(await auto()).toBe(W);
+      expect(logs.at(-1)).toContain("go-on: sent");
+      expect(sent).toHaveLength(2);
+      expect(await goOn(W)).toBe("running");
+      expect(sent).toHaveLength(2);
+      // The guard's window is 60 s: then the ticket's Continue goes again.
+      clock += 59_000;
+      expect(await goOn(W)).toBe("running");
+      clock += 2_000;
+      expect(await goOn(W)).toBe("sent");
+      expect(sent).toHaveLength(3);
+      // Nothing went through the terminal for W.
+      expect(t.typed).toEqual([]);
+      // A terminal worker: each press goes, as before.
+      const T = "bbbbbbbb-1111-4111-8111-111111111111";
+      await worker(T, { status: "idle", stop: { why: "limit", text: FABLE, at: 1 } });
+      t.spawn({ id: T, cwd: "/", args: [] });
+      expect(await goOn(T)).toBe("sent");
+      expect(await goOn(T)).toBe("sent");
+      expect(t.typed.filter((x) => x.id === T)).toHaveLength(4);
+    } finally {
+      vi.restoreAllMocks();
+      endHeadless();
+      await a.close();
+    }
   });
 
   // The ticket keeps a row when the session file could not be read: "could not read" is not

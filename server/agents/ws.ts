@@ -5,6 +5,11 @@ import { keepAlive, WS_CLOSE_FINAL } from "../wsKeepalive.js";
 import { isAgentId } from "../ids.js";
 import type { TerminalWsGate } from "../chief/wsgate.js";
 
+// The largest frame the route reads while it waits for the terminal: a size frame is far smaller.
+const EARLY_FRAME_MAX_BYTES = 256;
+
+type Frame = { t?: string; data?: string; cols?: number; rows?: number };
+
 // ?epoch=<id>&since=<offset>: where the browser's copy of the stream ends.
 export function parseResume(query: unknown): ResumePoint | undefined {
   const { epoch, since } = (query ?? {}) as { epoch?: unknown; since?: unknown };
@@ -27,6 +32,22 @@ export function registerTerminalWs(
     // The user token first, for any id but a worker agent's; a refusal has
     // already closed the socket.
     if (opts.gate && !(await opts.gate.agent(socket, req, id))) return;
+    // The browser sends its size as soon as the socket opens, and the route may still await a
+    // reattach (through the helper: two sudo calls). A frame that comes with no "message" listener
+    // is lost, and a lost size kept the agent's screen at the console's 120x30: an empty Terminal
+    // tab. So the listener goes on here: after the token check (a refused socket keeps and reads
+    // nothing; the gate's paused socket flows again only after this turn), before any other await.
+    // During the wait it keeps only the last size. Keys typed before the terminal is there are
+    // dropped, as before: the user typed them blind, and they could answer a dialog of the agent.
+    let take: ((f: Frame) => void) | null = null;
+    let size: Frame | null = null;
+    socket.on("message", (raw: Buffer) => {
+      if (!take && raw.length > EARLY_FRAME_MAX_BYTES) return;
+      let f: Frame;
+      try { f = JSON.parse(raw.toString()); } catch { return; }
+      if (take) take(f);
+      else if (f.t === "resize") size = f;
+    });
     // reattach() builds the dtach socket path from the id; a non-agent id (a
     // decoded `x%2F..%2Fy`, a service's `svc:<id>`) never gets that far.
     if (!isAgentId(id)) {
@@ -44,6 +65,7 @@ export function registerTerminalWs(
       socket.close(WS_CLOSE_FINAL);
       return;
     }
+    if (socket.readyState !== socket.OPEN) return; // the browser went during the wait
     keepAlive(socket);
     // Tell the client where the stream stands, in a binary frame (terminal output
     // is always text), then replay what it misses and stream live output.
@@ -56,9 +78,7 @@ export function registerTerminalWs(
     // Close when the terminal ends: a resumed agent is a new stream, and the
     // client reconnects to it when it next shows the terminal.
     const unend = att.onEnd(() => socket.close(WS_CLOSE_FINAL));
-    socket.on("message", (raw: Buffer) => {
-      let msg: { t?: string; data?: string; cols?: number; rows?: number };
-      try { msg = JSON.parse(raw.toString()); } catch { return; }
+    take = (msg) => {
       if (msg.t === "input" && typeof msg.data === "string") {
         // The fleet master's inbox watches its tab for drafts (server/master/draft.ts).
         opts.onInput?.(id, msg.data);
@@ -66,7 +86,11 @@ export function registerTerminalWs(
       } else if (msg.t === "resize" && msg.cols && msg.rows) {
         terminals.resize(id, msg.cols, msg.rows);
       }
-    });
+    };
+    if (size) take(size);
+    // A terminal that a reattach brought back has not drawn its screen for this console yet: it
+    // does, unless the size of the browser draws it (TerminalManager.redrawSoon).
+    terminals.redrawSoon(id);
     socket.on("close", () => { unsub(); unend(); });
   });
 }

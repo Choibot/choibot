@@ -10,7 +10,7 @@ import { buildHookSettings, hookToStatus } from "../hooks.js";
 import { compactSettings } from "../compact.js";
 import type { AgentRuntime, ArgOpts, PrepareCtx, PrepareResult, Preset } from "./types.js";
 import { accountDir, accountPaths, claudeAccountEnv, claudeJsonPath, isDefaultAccount, syncAccountDir, type AccountPaths } from "../accounts.js";
-import { CONSOLE_HOME_KINDS, trustClaudeDir } from "./claude-trust.js";
+import { CONSOLE_HOME_KINDS, markOnboarded, onboardedLaunch, trustClaudeDir } from "./claude-trust.js";
 import { writeFileNoFollow } from "../nofollow.js";
 import { runsAsChief } from "../../chief/chiefaccount.js";
 import { hardenedDeployment, helperSpawn } from "../../chief/hardened.js";
@@ -164,6 +164,10 @@ export const claudeRuntime: AgentRuntime = {
 
   bin: () => resolveClaudeBin(),
 
+  // Through the helper the console writes nothing into the agent's config: the agent marks its
+  // first-run screens done itself (claude-trust.ts ONBOARD_JS), then Claude starts.
+  helperLaunch: (bin, args) => onboardedLaunch(bin, args),
+
   async prepare(rec, ctx: PrepareCtx): Promise<PrepareResult> {
     // Hardened (ruling F1): AGENT_CLAUDE_CONFIG_DIR or a refusal, before any write.
     if (helperSpawn()) agentClaudeConfigDir(rec.id);
@@ -176,7 +180,12 @@ export const claudeRuntime: AgentRuntime = {
       if (why) throw new Error(`[chief] ${rec.id}: the hook settings folder is refused: ${why}`);
     } else await mkdir(dirname(settingsPath), { recursive: true });
     // The hooks, and where the session compacts its context (compact.ts).
-    const settings = JSON.stringify({ ...buildHookSettings({ agentId: rec.id, token: rec.hookToken, port: ctx.port }), ...compactSettings(rec.kind) });
+    // skipDangerousModePermissionPrompt: every agent starts with --dangerously-skip-permissions,
+    // and a config that never accepted it shows the bypass dialog first (Enter = "No, exit").
+    const settings = JSON.stringify({
+      ...buildHookSettings({ agentId: rec.id, token: rec.hookToken, port: ctx.port }), ...compactSettings(rec.kind),
+      skipDangerousModePermissionPrompt: true,
+    });
     // Hardened (ruling 2c-7-a): the worktree or home is agent-writable, so a
     // planted symlink or hard link there is refused, never written through.
     // A persistent agent of the second account: mode 0640, so only the console and
@@ -191,6 +200,9 @@ export const claudeRuntime: AgentRuntime = {
     // the default account needs neither, and keeps env unset as before.
     const paths = ctx.accounts ?? accountPaths();
     if (!isDefaultAccount(rec.account)) await syncAccountDir(rec.account!, paths);
+    // A fresh login's config has no hasCompletedOnboarding: Claude stops at its theme picker.
+    // Hardened (ruling 2c-7-a): no write here. Never for an agent's own clone.
+    if (!hardenedDeployment() && !isClone(rec)) markOnboarded(claudeJsonPath(rec.account, paths), accountDir(rec.account, paths));
     // A lead's home is outside the trusted workspace dir: mark its cwd trusted
     // in the .claude.json of the config dir its env gives, or the TUI stops at
     // the folder-trust dialog. Never blocks the spawn (claude-trust.ts).

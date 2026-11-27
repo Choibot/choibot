@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach } from "vitest";
+import { describe, it, expect, afterEach, vi } from "vitest";
 import Fastify, { type FastifyInstance } from "fastify";
 import websocket from "@fastify/websocket";
 import { parseResume, registerTerminalWs } from "./ws.js";
@@ -14,6 +14,7 @@ describe("registerTerminalWs", () => {
       reattach: async () => null,
       write: (id: string, d: string) => { order.push(`write:${id}:${d}`); },
       resize: () => {},
+      redrawSoon: () => {},
     };
     const app = Fastify();
     await app.register(websocket);
@@ -46,6 +47,7 @@ describe("registerTerminalWs", () => {
       reattach: async () => null,
       write: () => {},
       resize: () => {},
+      redrawSoon: () => {},
     };
     const app = Fastify();
     await app.register(websocket);
@@ -145,19 +147,31 @@ describe("registerTerminalWs gate", () => {
 
   let app: FastifyInstance;
   let calls: string[];
+  let redraws: string[];
   afterEach(async () => { await app.close(); });
 
-  async function build(gate: TerminalWsGate | undefined): Promise<void> {
+  // slowReattach: nothing is live in this process; reattach() takes that long (the helper's
+  // alive and kill-clients calls under sudo), then gives the terminal.
+  async function build(gate: TerminalWsGate | undefined, slowReattach?: number): Promise<void> {
     calls = [];
+    redraws = [];
     loads.length = 0;
+    const att = () => ({ snapshot: "SNAP", epoch: "e", offset: 0, resumed: false, subscribe: () => () => {}, onEnd: () => () => {} });
     const terminals = {
       attach: (id: string) => {
         calls.push(`attach:${id}`);
-        return { snapshot: "SNAP", epoch: "e", offset: 0, resumed: false, subscribe: () => () => {}, onEnd: () => () => {} };
+        return slowReattach === undefined ? att() : null;
       },
-      reattach: async (id: string) => { calls.push(`reattach:${id}`); return null; },
+      reattach: async (id: string) => {
+        calls.push(`reattach:${id}`);
+        if (slowReattach === undefined) return null;
+        await new Promise((r) => setTimeout(r, slowReattach));
+        calls.push(`reattached:${id}`);
+        return att();
+      },
       write: (id: string, d: string) => { calls.push(`write:${id}:${d}`); },
-      resize: (id: string) => { calls.push(`resize:${id}`); },
+      resize: (id: string, cols: number, rows: number) => { calls.push(`resize:${id}:${cols}x${rows}`); },
+      redrawSoon: (id: string) => { redraws.push(id); },
     };
     app = Fastify();
     await app.register(websocket);
@@ -165,17 +179,22 @@ describe("registerTerminalWs gate", () => {
     await app.ready();
   }
 
-  // Sends one input frame as soon as the socket is open.
-  async function open(id: string, headers: Record<string, string> = {}) {
+  // Sends one input frame as soon as the socket is open (first: the size, as the browser's
+  // XtermTerminal does on open, when `resize`), or the frames of `send`.
+  async function open(id: string, headers: Record<string, string> = {}, o: { resize?: boolean; waitMs?: number; send?: string[] } = {}) {
     const out = { text: [] as string[], closed: null as number | null };
     const ws = await app.injectWS(`/api/agents/${id}/terminal`, { headers } as any, {
       onInit: (s: any) => {
         s.on("message", (d: Buffer, binary: boolean) => { if (!binary) out.text.push(d.toString()); });
         s.on("close", (code: number) => { out.closed = code; });
       },
-      onOpen: (s: any) => { s.send(JSON.stringify({ t: "input", data: "hi\r" })); },
+      onOpen: (s: any) => {
+        if (o.send) { for (const f of o.send) s.send(f); return; }
+        if (o.resize) s.send(JSON.stringify({ t: "resize", cols: 157, rows: 41 }));
+        s.send(JSON.stringify({ t: "input", data: "hi\r" }));
+      },
     } as any);
-    await new Promise((r) => setTimeout(r, 50));
+    await new Promise((r) => setTimeout(r, o.waitMs ?? 50));
     ws.terminate();
     return out;
   }
@@ -240,6 +259,60 @@ describe("registerTerminalWs gate", () => {
       text: ["\r\n[no live terminal for this agent — resume it]\r\n"], closed: 4000,
     });
     expect(loads).toEqual([]);
+    expect(calls).toEqual([]);
+  });
+
+  // Nothing live here after a console restart: the route awaits reattach() (through the helper,
+  // two sudo calls). The size the browser sends at open comes during that wait; it must reach the
+  // PTY after it (a lost size left Claude unredrawn: an empty tab). Keys typed during the wait are
+  // dropped, as on main: typed blind, they could answer a dialog of the agent.
+  it("a slow reattach with the user token → the size sent at open reaches the PTY after it; early keys are dropped", async () => {
+    await build(hard(), 150);
+    expect(await open("w1", proto(TOKEN), { resize: true, waitMs: 400 })).toEqual({ text: ["SNAP"], closed: null });
+    expect(calls).toEqual(["attach:w1", "reattach:w1", "reattached:w1", "resize:w1:157x41"]);
+    expect(redraws).toEqual(["w1"]);
+  });
+
+  it("a slow reattach, not hardened → the same", async () => {
+    await build(undefined, 150);
+    expect(await open("w1", {}, { resize: true, waitMs: 400 })).toEqual({ text: ["SNAP"], closed: null });
+    expect(calls).toEqual(["attach:w1", "reattach:w1", "reattached:w1", "resize:w1:157x41"]);
+  });
+
+  it("a slow reattach → of the sizes sent during the wait, only the last reaches the PTY", async () => {
+    await build(hard(), 150);
+    const size = (cols: number) => JSON.stringify({ t: "resize", cols, rows: 41 });
+    await open("w1", proto(TOKEN), { waitMs: 400, send: [size(100), JSON.stringify({ t: "input", data: "y" }), size(157)] });
+    expect(calls).toEqual(["attach:w1", "reattach:w1", "reattached:w1", "resize:w1:157x41"]);
+  });
+
+  // The byte limit: during the wait the route reads only small frames (a size frame is ~40 bytes).
+  it("a slow reattach → a frame over 256 bytes during the wait is not parsed and not kept", async () => {
+    await build(hard(), 150);
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      const big = JSON.stringify({ t: "resize", cols: 99, rows: 41, pad: "BIG-FRAME".repeat(40) });
+      expect(big.length).toBeGreaterThan(256);
+      await open("w1", proto(TOKEN), { waitMs: 400, send: [big] });
+      expect(parse.mock.calls.filter(([t]) => String(t).includes("BIG-FRAME"))).toEqual([]);
+    } finally { parse.mockRestore(); }
+    expect(calls).toEqual(["attach:w1", "reattach:w1", "reattached:w1"]);
+  });
+
+  // A refused socket still emits the frames that come while it closes: the route puts no listener
+  // on it, so nothing is kept and nothing is parsed (main read none of them either).
+  it("a refused socket → no listener of the route, no frame parsed", async () => {
+    const gate = hard()!;
+    let server: any = null;
+    let before = -1;
+    await build({ ...gate, agent: (s, req, id) => { server = s; before = s.listenerCount("message"); return gate.agent(s, req, id); } });
+    const parse = vi.spyOn(JSON, "parse");
+    try {
+      const frame = JSON.stringify({ t: "resize", cols: 157, rows: 41, mark: "REFUSED-FRAME" });
+      expect(await open("w1", {}, { send: Array(20).fill(frame), waitMs: 100 })).toEqual(refused);
+      expect(parse.mock.calls.filter(([t]) => String(t).includes("REFUSED-FRAME"))).toEqual([]);
+    } finally { parse.mockRestore(); }
+    expect(server.listenerCount("message")).toBe(before);
     expect(calls).toEqual([]);
   });
 

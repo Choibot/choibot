@@ -3,6 +3,8 @@
 "use client";
 import { useEffect, useState } from "react";
 import { INSTALL_WORDS, NEW_CODE_WORDS, builtWords, fetchUpdateView, fetchVersion, shortCommit, updateWords, versionStatus, type UpdateView, type VersionRead } from "../../lib/version";
+import { useUpdateProgress } from "../../lib/useUpdateProgress";
+import { UpdateProgress } from "../UpdateProgress";
 import { Block, cx as s, Note, Row, StatusLine, type SectionProps } from "./kit";
 
 export function VersionSettings(_: SectionProps) {
@@ -13,6 +15,10 @@ export function VersionSettings(_: SectionProps) {
   const built = builtWords(v?.builtAt ?? null);
   // Root's updater (a hosted console): one line, in place of "how new code comes".
   const updates = updateWords(update, Date.now());
+  // A press under way (from any device), or one this page followed to its end: the same block as
+  // on the update ticket, in place of that line.
+  const { p, live } = useUpdateProgress({ item: null, run: null, pollOnMount: true });
+  const pressShown = p.t === "going" || (live && p.t !== "idle");
 
   return (
     <>
@@ -41,7 +47,8 @@ export function VersionSettings(_: SectionProps) {
               </Row>
             )}
           </Block>
-          {updates ? <Note>{updates}</Note> : <Note>{NEW_CODE_WORDS[v.kind]}</Note>}
+          {pressShown ? <div className={s.update}><UpdateProgress p={p} live={live} /></div>
+            : updates ? <Note>{updates}</Note> : <Note>{NEW_CODE_WORDS[v.kind]}</Note>}
         </>
       )}
     </>

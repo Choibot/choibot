@@ -23,6 +23,7 @@ import { DISPLAY_NAME, USER_CLI } from "../../../server/brand";
 import type { StepId } from "../../../server/setup/steps";
 import { FirstAgentStep } from "./FirstAgentStep";
 import { FirstPrStep } from "./FirstPrStep";
+import { Fold, More } from "./Fold";
 import { GithubStep } from "./GithubStep";
 import { RepoStep } from "./RepoStep";
 import c from "./Setup.module.css";
@@ -34,8 +35,9 @@ export type SetupNav = {
   go?: (section: string) => void;
   onNewAgent?: () => void;
   onOpenQueue?: () => void;
-  // Open an agent (its thread and its terminal).
-  onOpenAgent?: (id: string) => void;
+  // Open the agent where its terminal shows: the first agent with no session (its pane shows the
+  // terminal when it has no session). The set-up opens no agent thread.
+  onOpenTerminal?: (id: string) => void;
   // Leave the Set-up page for the console (the button of the "done" screen).
   onLeave?: () => void;
 };
@@ -104,16 +106,31 @@ function TelegramStep({ nav, onDone }: { nav: SetupNav; onDone: () => Promise<vo
 }
 
 // The form or the button of a step, or one plain line of what to do today. The row of the list
-// and the card of the guide's thread (GuidePane) both draw this one part.
+// (Settings, Set-up) and the card of the stage (Stage.tsx) both draw this one part.
 // `auto`: the press that opened this part was the user's action for the step (the card of the
 // done screen): a part that has one more button starts at once.
-export function StepAction({ row, nav, onDone, auto = false }: { row: SetupRow; nav: SetupNav; onDone: () => Promise<void>; auto?: boolean }) {
+// `stage`: the part is on the stage: one live part, and the other help in a closed "More".
+export function StepAction({ row, nav, onDone, auto = false, stage = false }: {
+  row: SetupRow; nav: SetupNav; onDone: () => Promise<void>; auto?: boolean; stage?: boolean;
+}) {
   const settings = (id: string) => nav.go && (() => nav.go?.(id));
   switch (row.id) {
     case "install":
       return <Today>{`Run \`${USER_CLI} setup\` on your server. It repairs what is missing and goes on where it stopped.`}</Today>;
     case "claude":
       // The whole login on the page: the sign-in link of Claude and its code. No terminal.
+      if (stage) {
+        return (
+          <>
+            <Today>You sign in on the page of Claude and paste its code here. Your agents then work with your Claude plan.</Today>
+            <ClaudeLogin account={DEFAULT_ACCOUNT} onDone={onDone} />
+            <More label="the logins">
+              <ClaudeLogins />
+              <div className={c.acts}><Open onClick={settings("accounts")}>More logins</Open></div>
+            </More>
+          </>
+        );
+      }
       return (
         <>
           <ClaudeLogins />
@@ -148,7 +165,7 @@ export function StepAction({ row, nav, onDone, auto = false }: { row: SetupRow; 
     case "repo":
       return <RepoStep onDone={onDone} />;
     case "agent":
-      return <FirstAgentStep onDone={onDone} onOpenAgent={nav.onOpenAgent} />;
+      return <FirstAgentStep onDone={onDone} stage={stage} onOpenTerminal={nav.onOpenTerminal} />;
     case "merge":
       return <FirstPrStep onDone={onDone} nav={nav} />;
     case "phone":
@@ -168,10 +185,10 @@ export function StepAction({ row, nav, onDone, auto = false }: { row: SetupRow; 
 
 // The steps whose part stays open after they are done: the phone that was added, and the
 // Telegram card (its second step, the fleet master chat, and "Disconnect").
-const STAYS: StepId[] = ["phone", "telegram"];
+export const STAYS: StepId[] = ["phone", "telegram"];
 
 // The protection of this console, when it is strong (Settings, Devices says it in full).
-const STRONG_WORDS = "Protection: Strong. Your agents run under their own account on your server: they cannot read the keys of your devices or the settings of the console.";
+export const STRONG_WORDS = "Protection: Strong. Your agents run under their own account on your server: they cannot read the keys of your devices or the settings of the console.";
 
 function StepRow({ row, open, onToggle, nav, onDone }: { row: SetupRow; open: boolean; onToggle: () => void; nav: SetupNav; onDone: () => Promise<void> }) {
   // A step opens when the user can act on it now. The phone step and the Telegram step also
@@ -195,13 +212,12 @@ function StepRow({ row, open, onToggle, nav, onDone }: { row: SetupRow; open: bo
       {canOpen
         ? <button type="button" className={c.head} onClick={onToggle} aria-expanded={open}>{head}</button>
         : <div className={c.head}>{head}</div>}
-      {canOpen && open && (
-        <div className={c.body}>
-          <p className={c.why}>{row.why}</p>
-          {row.error && <p className={c.error}>{row.error}</p>}
-          <StepAction row={row} nav={nav} onDone={onDone} />
-        </div>
-      )}
+      {/* The step that is done closes and the next opens in the same render: one motion each. */}
+      <Fold open={canOpen && open} className={c.body}>
+        <p className={c.why}>{row.why}</p>
+        {row.error && <p className={c.error}>{row.error}</p>}
+        <StepAction row={row} nav={nav} onDone={onDone} />
+      </Fold>
     </div>
   );
 }

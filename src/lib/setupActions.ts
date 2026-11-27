@@ -199,8 +199,10 @@ export function since(ms: number): string {
 }
 
 // What the "Start the first agent" row says and offers for a state of the first agent.
-// start: the first press. again: a new agent for the same task. thread: open the agent.
-export type FirstSay = { tone: "off" | "run" | "ok" | "warn"; line: string; hint?: string; acts: ("start" | "again" | "thread")[] };
+// start: the first press. again: a new agent for the same task. terminal: open the agent where
+// its terminal shows (with no session file, its pane shows the terminal). The set-up sends the
+// user to no agent thread (the owner's word on #171): the terminal is its one way off the page.
+export type FirstSay = { tone: "off" | "run" | "ok" | "warn"; line: string; hint?: string; acts: ("start" | "again" | "terminal")[] };
 
 export function firstSay(v: FirstView): FirstSay {
   const a = v.agent;
@@ -209,24 +211,28 @@ export function firstSay(v: FirstView): FirstSay {
       ? { tone: "off", line: `The agent works in its own copy of ${v.repo}. Your main branch is not touched.`, hint: "A first task takes 3 to 6 minutes.", acts: ["start"] }
       : { tone: "warn", line: "No repo with push access is on your server. Do the step “Pick a repo” first.", acts: [] };
   }
-  if (v.ticket?.state === "open") return { tone: "ok", line: "The pull request is open. Its ticket is in the next step.", acts: ["thread"] };
+  if (v.ticket?.state === "open") return { tone: "ok", line: "The pull request is open. Its ticket is in the next step.", acts: [] };
   if (v.ticket?.state === "merged") return { tone: "ok", line: "The pull request is merged.", acts: [] };
-  if (v.ticket) return { tone: "warn", line: "The pull request was closed and not merged. Start the task again.", acts: ["again", "thread"] };
+  if (v.ticket) return { tone: "warn", line: "The pull request was closed and not merged. Start the task again.", acts: ["again"] };
+  if (a.noSession && (a.state === "working" || a.state === "waiting")) {
+    return { tone: "warn", line: "No session started yet.", hint: "Its terminal shows what Claude waits for.", acts: ["terminal"] };
+  }
   switch (a.state) {
     case "working": {
       const ms = v.now - a.startedAt;
       return ms >= SLOW_MS
-        ? { tone: "run", line: `Working for ${since(ms)}. This takes longer than usual.`, hint: "Open its thread to see what it does. It can wait for an answer from you.", acts: ["thread"] }
-        : { tone: "run", line: `Working · started ${since(ms)} ago`, hint: "A first task takes 3 to 6 minutes. You can close this page: the agent keeps working.", acts: ["thread"] };
+        ? { tone: "run", line: `Working for ${since(ms)}. This takes longer than usual.`, hint: "You can close this page: the agent keeps working.", acts: [] }
+        : { tone: "run", line: `Working · started ${since(ms)} ago`, hint: "A first task takes 3 to 6 minutes. You can close this page: the agent keeps working.", acts: [] };
     }
     case "waiting":
       return a.pullRequest
-        ? { tone: "warn", line: "The agent opened a pull request, but its ticket did not come.", hint: "Open its thread and write: “Add the ticket of your pull request to the Queue.”", acts: ["thread"] }
-        : { tone: "warn", line: "The agent stopped and opened no pull request.", hint: "Open its thread to read what it says. You can answer it there, or start the task again.", acts: ["thread", "again"] };
+        ? { tone: "warn", line: "The agent opened a pull request, but its ticket did not come.", hint: "If the ticket does not come in a few minutes, start the task again.", acts: ["again"] }
+        : { tone: "warn", line: "The agent stopped and opened no pull request.", hint: "Start the task again.", acts: ["again"] };
     case "error":
-      return { tone: "warn", line: "The agent stopped with an error.", hint: "Open its thread to see the error, or start the task again.", acts: ["thread", "again"] };
+      // The error's own sentence where the console has it (a limit, a model error, a login).
+      return { tone: "warn", line: "The agent stopped with an error.", ...(a.error ? { hint: a.error } : {}), acts: ["again"] };
     case "ended":
-      return { tone: "warn", line: "The agent ended and opened no pull request.", hint: "Start the task again.", acts: ["again", "thread"] };
+      return { tone: "warn", line: "The agent ended and opened no pull request.", hint: "Start the task again.", acts: ["again"] };
     case "closed":
       return { tone: "warn", line: "The agent was closed before it opened a pull request.", hint: "Start the task again.", acts: ["again"] };
     default:
@@ -239,8 +245,8 @@ export function firstSay(v: FirstView): FirstSay {
 export function mergeHint(i: Pick<QueueItem, "pr">): string | null {
   const pr = i.pr && "url" in i.pr ? i.pr : null;
   if (!pr) return null;
-  if (pr.mergeable === "CONFLICTING") return "The pull request has conflicts with the main branch. Open the thread of the agent and write: “Update your branch.”";
-  if (pr.checks === "failure") return "A check of the pull request fails. Open it on GitHub to see why, or ask the agent in its thread to repair it. Merge asks you first.";
+  if (pr.mergeable === "CONFLICTING") return "The pull request has conflicts with the main branch. Open it on GitHub to see them.";
+  if (pr.checks === "failure") return "A check of the pull request fails. Open it on GitHub to see why. Merge asks you first.";
   if (pr.checks === "pending") return "The checks of the pull request still run. You can wait, or merge now: Merge asks you first.";
   return null;
 }

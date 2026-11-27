@@ -9,6 +9,7 @@ import { renderToStaticMarkup as toMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { setupRows } from "../../lib/setup";
 import type { GuideItem } from "../../lib/guide";
+import { Pending } from "./Fold";
 import { GuideBanner, GuideItems } from "./GuidePane";
 
 const renderToStaticMarkup = toMarkup as (el: React.ReactElement) => string;
@@ -17,7 +18,7 @@ const renderToStaticMarkup = toMarkup as (el: React.ReactElement) => string;
 
 const item = (o: Record<string, unknown>, n: number) => ({ id: `i${n}`, ts: n, ...o }) as GuideItem;
 const render = (items: GuideItem[], busy = false, late = false) =>
-  renderToStaticMarkup(createElement(GuideItems, { items, rows: setupRows(null), busy, late, card: () => createElement("div", { "data-live": "" }, "PART") }));
+  renderToStaticMarkup(createElement(GuideItems, { items, rows: setupRows(null), busy, late }));
 
 describe("GuideItems", () => {
   it("draws what the guide says as plain text: no link, no picture, no HTML of the model", () => {
@@ -53,11 +54,20 @@ describe("GuideItems", () => {
     expect(html).toContain("This message was not sent");
   });
 
-  it("a card is live only with a state of the server; \"writes\" and \"late\" are plain lines", () => {
-    // No answer of the step list yet: the card shows no form.
-    expect(render([item({ kind: "card", step: "github" }, 1)])).not.toContain("PART");
+  it("draws no step card (the stage holds the step); \"writes\" and \"late\" are plain lines", () => {
+    expect(render([item({ kind: "card", step: "github" }, 1)])).toBe(render([]));
+    // A card between two lines of the guide does not split them into two groups.
+    const html = render([item({ kind: "guide", text: "A" }, 1), item({ kind: "card", step: "github" }, 2), item({ kind: "guide", text: "B" }, 3)]);
+    expect(html.match(/>Guide</g)).toHaveLength(1);
+    expect(html).toContain("A");
+    expect(html).toContain("B");
     expect(render([], true)).toContain("The guide writes…");
     expect(render([], false, true)).toContain("The guide did not answer. Ask again, or use the list.");
+  });
+
+  it("a \"Reading…\" line keeps its words and its tag", () => {
+    const html = renderToStaticMarkup(createElement(Pending, { className: "today", children: "Reading the ticket…" }));
+    expect(html).toMatch(/^<p class="today [^"]+">Reading the ticket…<\/p>$/);
   });
 
   it("the banner says why, when it ends, and that the list works", () => {

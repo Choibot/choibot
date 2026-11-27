@@ -58,6 +58,39 @@
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* A worker's title is its Rename button: it looks like the title, as wide as its text. */
+.labelBtn {
+  justify-self: start;
+  max-width: 100%;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: none;
+  color: inherit;
+  font-family: inherit;
+  line-height: inherit;
+  text-align: left;
+  cursor: text;
+}
+.labelBtn:hover { text-decoration: underline dotted var(--ink-2); text-underline-offset: 3px; }
+.labelBtn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; border-radius: 2px; }
+/* The title edited in place: the same font and line height as the title (no jump); the frame is a
+   shadow inside the box, so the title's clip does not cut it. */
+.nameInput {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  margin: 0;
+  padding: 0 4px;
+  font: inherit;
+  line-height: inherit;
+  color: var(--ink-0);
+  background: var(--bg-0);
+  border: none;
+  border-radius: var(--radius-sm);
+  box-shadow: inset 0 0 0 1px var(--ink-2);
+  outline: none;
+}
 /* The status line never runs out of its own box (the 3 px are the room of the running dot's halo). */
 .meta {
   display: flex;
@@ -82,6 +115,8 @@
    gives way first (a long branch name must not cut the amber mark). 13 px: the dot and its gap. */
 .state[data-tone="warn"] { min-width: 0; max-width: calc(100% - 13px); overflow: hidden; text-overflow: ellipsis; }
 .sep { flex: none; }
+/* The model ("opus"): a quiet word that the branch gives way to. */
+.model { flex: none; }
 .branch {
   font: var(--weight-regular) var(--text-xs) var(--font-mono);
   min-width: 0;

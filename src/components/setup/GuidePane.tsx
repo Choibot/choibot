@@ -2,18 +2,18 @@
 // "Ask the guide, or say what you want to do".
 //
 // The thread is data of the server (server/guide/types.ts). What the guide says is drawn as
-// PLAIN TEXT: no HTML, no markdown, no link and no picture made from its words. An address the
-// user must open comes only from a card, and a card is the same part as the row of that step in
-// the list (StepAction): its form or its button calls the route of the row as the paired user.
-// The result of a check and the last error of a step are the server's words.
+// PLAIN TEXT: no HTML, no markdown, no link and no picture made from its words. The thread draws
+// no step card: a step is only on the stage (Stage.tsx), and an address the user must open comes
+// only from the part of the step there. The result of a check and the last error of a step are
+// the server's words.
 //
 // The box stops a text that looks like a secret before it leaves the browser (lib/guide.ts
 // sendToGuide). The box is emptied at the send, and no text of it is kept in a store.
 "use client";
-import { Fragment, useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
-import { BUSY_LATE_TEXT, cardModes, nextParts, OFF_HEAD, OFF_TAIL, offLine, sideOf, type CardMode, type GuideItem, type GuideOff } from "../../lib/guide";
+import { Fragment, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { Fold } from "./Fold";
+import { BUSY_LATE_TEXT, nextParts, OFF_HEAD, OFF_TAIL, offLine, sideOf, type GuideItem, type GuideOff } from "../../lib/guide";
 import type { SetupRow } from "../../lib/setup";
-import { stateWord } from "../../lib/setup";
 import type { GuideHook } from "../../lib/useGuide";
 import { STEPS, type StepId } from "../../../server/setup/steps";
 import { CheckIcon } from "../SideIcons";
@@ -41,40 +41,23 @@ function Said({ item }: { item: Extract<GuideItem, { kind: "guide" }> }) {
   );
 }
 
-const CARD_WORD: Record<CardMode, string> = { live: "", done: "Done", waits: "Waits", old: "", checking: "Checking…" };
-
-// One card: the head with the title of the step, then the part of the step when the card is
-// live. A card that is not live is one line: what the check says, or where the newer card is.
-function Card({ step, mode, row, title, body, phone }: { step: StepId; mode: CardMode; row: SetupRow | undefined; title: string; body: ReactNode; phone: boolean }) {
-  if (mode === "old") return <p className={g.stub} data-step={step}>{title}: a newer card is below.</p>;
-  return (
-    <section className={g.card} data-step={step} data-mode={mode} aria-label={title}>
-      <header className={g.cardHead}>
-        <span className={c.mark} data-state={mode === "done" ? "done" : row?.state ?? "checking"} aria-hidden>{mode === "done" && <CheckIcon size={12} />}</span>
-        <b className={g.cardTitle}>{title}</b>
-        <span className={g.cardWord}>{mode === "live" && row ? stateWord(row) : CARD_WORD[mode]}</span>
-      </header>
-      {/* The part of the step is the one of the list: it gets the list's own sizes (Setup.module.css .wrap). */}
-      {mode === "live"
-        ? <div className={`${c.wrap} ${g.cardBody}`} data-phone={phone ? "" : undefined}>{body}</div>
-        : row && mode !== "checking" ? <p className={g.cardLine}>{row.text}</p> : null}
-    </section>
-  );
-}
-
-// The items of the thread. `card`: the live part of a step (the page gives StepAction).
-export function GuideItems({ items, rows, busy = false, late = false, phone = false, card }: {
-  items: GuideItem[]; rows: SetupRow[]; busy?: boolean; late?: boolean; phone?: boolean; card: (row: SetupRow) => ReactNode;
+// The items of the thread. A card item of the server (the step to do now) is not drawn: the step
+// is on the stage.
+export function GuideItems({ items: all, rows, busy = false, late = false }: {
+  items: GuideItem[]; rows: SetupRow[]; busy?: boolean; late?: boolean;
 }) {
-  const modes = cardModes(items, rows);
+  const items = all.filter((i) => i.kind !== "card");
+  // The lines that were there when the thread opened. A line that comes later folds in.
+  const firstIds = useRef<Set<string> | null>(null);
+  if (firstIds.current === null) firstIds.current = new Set(items.map((i) => i.id));
+  const known = firstIds.current;
   return (
     <>
       {items.map((i, n) => {
         const side = sideOf(i);
         const first = n === 0 || sideOf(items[n - 1]) !== side;
-        const row = "step" in i ? rows.find((r) => r.id === i.step) : undefined;
-        return (
-          <Fragment key={i.id}>
+        const parts = (
+          <>
             {first && (
               <div className={t.who} data-mine={side === "you" ? "" : undefined}>
                 {side === "guide" && <span className={t.ag}><GuideIcon /></span>}
@@ -96,16 +79,20 @@ export function GuideItems({ items, rows, busy = false, late = false, phone = fa
                 <span className={g.chipText}>{i.text}</span>
               </div>
             )}
-            {i.kind === "card" && (
-              <Card step={i.step} mode={modes.get(i.id) ?? "checking"} row={row} title={titleOf(i.step, rows)} body={row ? card(row) : null} phone={phone} />
-            )}
             {i.kind === "stopped" && <div className={g.stop} role="note"><LockIcon /><span>{i.text}</span></div>}
             {i.kind === "note" && <p className={g.note}>{i.text}</p>}
-          </Fragment>
+          </>
         );
+        return known.has(i.id)
+          ? <Fragment key={i.id}>{parts}</Fragment>
+          : <Fold key={i.id} open appear frame={g.foldLine} className={g.foldLineIn}>{parts}</Fold>;
       })}
-      {busy && <div className={t.live} role="status"><i className={t.liveDot} aria-hidden /><span className={t.liveWord}>The guide writes…</span></div>}
-      {late && <p className={g.note} role="status">{BUSY_LATE_TEXT}</p>}
+      <Fold open={busy} frame={g.foldLine} className={g.foldLineIn}>
+        <div className={t.live} role="status"><i className={t.liveDot} aria-hidden /><span className={t.liveWord}>The guide writes…</span></div>
+      </Fold>
+      <Fold open={late} frame={g.foldLine} className={g.foldLineIn}>
+        <p className={g.note} role="status">{BUSY_LATE_TEXT}</p>
+      </Fold>
     </>
   );
 }
@@ -179,13 +166,11 @@ function Box({ guide, phone }: { guide: GuideHook; phone: boolean }) {
   );
 }
 
-export function GuidePane({ guide, rows, phone = false, card }: {
-  guide: GuideHook; rows: SetupRow[]; phone?: boolean; card: (row: SetupRow) => ReactNode;
-}) {
+export function GuidePane({ guide, rows, phone = false }: { guide: GuideHook; rows: SetupRow[]; phone?: boolean }) {
   const items = guide.view?.items ?? [];
   // The end of the thread stays on screen: when a line comes, when the guide starts to write,
-  // and when a card grows (its part loads after the card is there). A user who scrolled up to
-  // read is left there until the next line of the thread.
+  // and when a line folds in. A user who scrolled up to read is left there until the next line
+  // of the thread.
   const scroller = useRef<HTMLDivElement>(null);
   const col = useRef<HTMLDivElement>(null);
   const stick = useRef(true);
@@ -205,7 +190,7 @@ export function GuidePane({ guide, rows, phone = false, card }: {
         <div className={g.col} ref={col}>
           {items.length === 0
             ? <p className={g.note}>The guide reads the list…</p>
-            : <GuideItems items={items} rows={rows} busy={guide.busy} late={guide.late} phone={phone} card={card} />}
+            : <GuideItems items={items} rows={rows} busy={guide.busy} late={guide.late} />}
         </div>
       </div>
       <Box guide={guide} phone={phone} />

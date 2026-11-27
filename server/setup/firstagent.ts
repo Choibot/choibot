@@ -14,6 +14,8 @@ import type { QueueItem } from "../chief/queue/types.js";
 
 export const FIRST_TASK_TITLE = "Add a “Run it locally” section to the README";
 export const FIRST_AGENT_LABEL = "First task";
+// A first turn starts in seconds: after this long with no turn, the row says so.
+export const NO_SESSION_MS = 90_000;
 
 // The task, as the agent gets it. The rules of the Queue (how to add the ticket of a pull
 // request) are in the instructions every agent of the console has.
@@ -49,6 +51,13 @@ export type FirstView = {
     id: string; name: string; state: FirstAgentState; startedAt: number;
     // The agent opened a pull request (GitHub knows it), with or without a ticket.
     pullRequest: boolean;
+    // The error's own sentence when the Claude program cut its last turn (the record's `stop`):
+    // a limit, a model error, a signed-out login. Not there while it works.
+    error?: string;
+    // NO_SESSION_MS after the start that sent the task (store.ts firstPromptAt; else the press)
+    // Claude has not taken it in (the record still keeps the first message, store.ts
+    // firstPrompt): its thread has no session, and Claude may wait for an answer on its screen.
+    noSession: boolean;
   };
   // The newest pull request ticket of that agent.
   ticket: null | { id: string; state: FirstTicketState };
@@ -165,7 +174,11 @@ export class FirstAgent {
     const ticket = ticketOf(items, kept.agentId);
     return {
       task: FIRST_TASK_TITLE, repo: kept.repo, repos: [],
-      agent: { id: kept.agentId, name: rec?.label ?? FIRST_AGENT_LABEL, state: agentState(rec), startedAt: kept.startedAt, pullRequest: !!rec?.prUrl || ticket !== null },
+      agent: {
+        id: kept.agentId, name: rec?.label ?? FIRST_AGENT_LABEL, state: agentState(rec), startedAt: kept.startedAt, pullRequest: !!rec?.prUrl || ticket !== null,
+        noSession: rec?.firstPrompt !== undefined && now - (rec.firstPromptAt ?? kept.startedAt) >= NO_SESSION_MS,
+        ...(rec?.stop && rec.status !== "running" ? { error: rec.stop.text } : {}),
+      },
       ticket: ticket && { id: ticket.id, state: ticketState(ticket) },
       now,
     };

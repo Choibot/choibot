@@ -6,7 +6,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { pasteOf, typeIntoAgentWhy, withTypingLock, type ReplyTerminals } from "../issues/reply.js";
 import type { CaptureLine } from "../chief/brain/capture.js";
-import { hostOf } from "./host.js";
+import { hostOf, TOO_LARGE_TEXT } from "./host.js";
 
 export const MAX_TEXT = 32_000;
 export const DEDUP_KEEP = 200;
@@ -41,7 +41,9 @@ export type InputResult =
   | { code: 404; body: { reason: "agent-gone" } }
   // `dialog`: the line waits because Claude asks a question on the agent's screen (the reason
   // stays "starting" for the callers that try again on it; the page says the true cause).
-  | { code: 409; body: { reason: "not-live" | "starting" | "busy"; dialog?: true } };
+  | { code: 409; body: { reason: "not-live" | "starting" | "busy"; dialog?: true } }
+  // A headless worker's limit (host.ts TooLarge); not reached below MAX_TEXT chars.
+  | { code: 413; body: { reason: "too-large"; error: string } };
 
 // The reminder deliverer's options (the queue Deliverer passes none):
 // noResume — a stopped closed agent is not-live (the reminder deliverer
@@ -114,6 +116,7 @@ export class ComposerGate {
       const typed = await typeIntoAgentWhy(this.d.terminals, id, text, this.d.sleep);
       // A dialog of Claude is on its screen: the line would answer it. As a TUI that is not ready.
       if (typed === "dialog") return { code: 409, body: { reason: "starting", dialog: true } };
+      if (typed === "too-large") return { code: 413, body: { reason: "too-large", error: TOO_LARGE_TEXT } };
       if (typed !== "sent") return { code: 409, body: { reason: "not-live" } };
       if (fromUser) this.d.onUserLine?.(id);
       this.remember(id, msgId);

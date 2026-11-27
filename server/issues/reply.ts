@@ -8,7 +8,7 @@ import type { IssueIntake } from "./intake.js";
 import { reopened, summaryOf, type Issue, type IssueStore } from "./store.js";
 import type { TgMessage } from "./telegram.js";
 import { largestPhoto } from "./updates.js";
-import { hostOf } from "../agents/host.js";
+import { hostOf, TOO_LARGE_TEXT } from "../agents/host.js";
 
 export type ReplyTerminals = Pick<TerminalManager, "has" | "hasSession" | "write" | "inputReady"> & {
   reattach(id: string): Promise<unknown>;
@@ -16,8 +16,9 @@ export type ReplyTerminals = Pick<TerminalManager, "has" | "hasSession" | "write
   dialogOn?(id: string): Promise<boolean>;
 };
 
-export type SendResult = "sent" | "not-live" | "starting";
-export type TypeResult = "sent" | "not-live" | "dialog";
+// "too-large": a headless worker's limit (host.ts TooLarge); nothing was sent. A terminal has none.
+export type SendResult = "sent" | "not-live" | "starting" | "too-large";
+export type TypeResult = "sent" | "not-live" | "dialog" | "too-large";
 // After a reattach the session's screen comes back with the replay: the dialog check waits this long for it.
 export const REATTACH_SETTLE_MS = 400;
 
@@ -60,10 +61,8 @@ export async function typeIntoAgentWhy(
   if (host) {
     const r = await host.send(agentId, text);
     if (typeof r === "string") return r;
-    // Not reached today: the product registers no headless host. Its wiring gives "too-large" to
-    // the callers (TypeResult); until then the line is not sent, and the log says why.
     console.warn(`[reply] ${agentId}: a message of ${r.bytes} bytes is above the worker's limit of ${r.limit}: not sent`);
-    return "not-live";
+    return "too-large";
   }
   if (!terminals.has(agentId) && (await terminals.hasSession(agentId))) {
     await terminals.reattach(agentId);
@@ -112,6 +111,7 @@ export const REPLY_TEXT = {
   notLive: "Agent not live — resume it in the console.",
   startFailed: "Start failed — tap Fix to retry.",
   starting: "Agent is starting — send this again in a moment.",
+  tooLarge: TOO_LARGE_TEXT,
 } as const;
 
 export type ReplyDeps = {
@@ -175,7 +175,7 @@ export async function handleReply(d: ReplyDeps, issueId: string, msg: TgMessage)
     // Nothing was typed: keep the status, tell the user why.
     const refused = async (r: Exclude<SendResult, "sent">) => {
       await record();
-      await say(r === "starting" ? REPLY_TEXT.starting : REPLY_TEXT.notLive);
+      await say(r === "starting" ? REPLY_TEXT.starting : r === "too-large" ? REPLY_TEXT.tooLarge : REPLY_TEXT.notLive);
     };
 
     switch (cur.status) {

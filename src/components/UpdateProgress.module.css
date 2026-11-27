@@ -1,0 +1,45 @@
+/* src/components/UpdateProgress.module.css — the place of the Update button (A · Inset): the button,
+   the steps or the end share one grid cell, so the block keeps its height from the press to the end.
+   Motion: transform and opacity only. Colour only at dot size. */
+.stage { display: grid; align-items: center; min-height: 28px; }
+.layer { grid-area: 1 / 1; min-width: 0; opacity: 0; visibility: hidden; transform: translateY(3px); transition: opacity 0.18s ease, transform 0.18s ease, visibility 0s linear 0.18s; }
+.layer[data-on] { opacity: 1; visibility: visible; transform: none; transition: opacity 0.22s ease 0.06s, transform 0.22s cubic-bezier(0.2, 0, 0, 1) 0.06s, visibility 0s; }
+
+.steps { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 14px; margin: 0; padding: 0; list-style: none; -webkit-user-select: none; user-select: none; }
+.step { display: flex; align-items: center; gap: 6px; color: var(--ink-2); white-space: nowrap; }
+.step[data-state="done"] { color: var(--ink-1); }
+.step[data-state="now"] { color: var(--ink-0); font-weight: var(--weight-medium); }
+.mark { flex: none; position: relative; width: 12px; height: 12px; display: grid; place-items: center; }
+.step[data-state="done"] .mark > svg { animation: tick 0.28s cubic-bezier(0.2, 0, 0, 1) both; }
+/* The present step's sign of life: a dot, and a ring that grows from it and fades (no percentage). */
+.live { position: relative; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.live::after { content: ""; position: absolute; inset: 0; border-radius: 50%; background: currentColor; animation: ping 1.6s cubic-bezier(0, 0, 0.2, 1) infinite; }
+@keyframes ping { 0% { transform: scale(1); opacity: 0.45; } 75%, 100% { transform: scale(2.8); opacity: 0; } }
+@keyframes tick { from { transform: scale(0.5); opacity: 0; } to { transform: none; opacity: 1; } }
+
+/* The end: one line with a dot, and the button that goes with it. */
+.end { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; color: var(--ink-0); overflow-wrap: anywhere; }
+.line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.dot { flex: none; width: 7px; height: 7px; border-radius: 50%; transform: translateY(-1px); }
+.ok { background: var(--ok); }
+.err { background: var(--err); }
+/* The one end motion: the line rises into place, its dot grows in. */
+.enter { animation: rise 0.42s cubic-bezier(0.2, 0, 0, 1) both; }
+.enter .dot { animation: grow 0.5s cubic-bezier(0.2, 0, 0, 1) 0.12s both; }
+@keyframes rise { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: none; } }
+@keyframes grow { from { opacity: 0; transform: translateY(-1px) scale(0.2); } to { opacity: 1; transform: translateY(-1px) scale(1); } }
+
+.btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; height: 28px; padding: 0 12px;
+  border: 1px solid var(--line-2); border-radius: var(--radius-sm); background: none; color: var(--ink-0);
+  font: var(--weight-medium) var(--text-sm)/1 var(--font-sans); white-space: nowrap; cursor: pointer; transition: background-color 0.12s ease;
+}
+@media (hover: hover) { .btn:hover { background: var(--bg-2); } }
+.btn:focus-visible { outline: 2px solid var(--ink-1); outline-offset: 1px; }
+@media (max-width: 640px) { .stage { min-height: 36px; } .btn { height: auto; min-height: 36px; padding: 8px 14px; touch-action: manipulation; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .layer, .layer[data-on] { transform: none; transition: none; }
+  .live::after, .step[data-state="done"] .mark > svg, .enter, .enter .dot { animation: none; }
+  .live::after { opacity: 0; }
+}

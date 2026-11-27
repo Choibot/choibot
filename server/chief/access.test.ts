@@ -403,6 +403,7 @@ const CLI: Record<string, { routes: string[]; levels: Use[] }> = {
   "agents resume": { routes: ["POST /api/agents/:id/resume"], levels: ["lead", "master"] },
   "agents delete": { routes: ["POST /api/agents/:id/delete"], levels: ["master"] },
   "agents close": { routes: ["POST /api/agents/:id/close"], levels: ["lead"] },
+  "agents rename": { routes: ["POST /api/agents/:id/rename"], levels: ["lead"] },
   // With strong protection the user alone merges and answers (gate.ts USER_ALONE_ERR).
   "agents merge-pr": { routes: ["GET /api/agents/:id", "POST /api/gh/pr/merge"], levels: ["user"] },
   // The review of a worker's change: a lead on the workers it spawned, the master on any worker.

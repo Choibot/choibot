@@ -24,6 +24,7 @@ import type { UsageResult } from "../usage.js";
 import { chiefPromptFor } from "../chief/brain/prompt.js";
 import { chiefActive, CHIEF_PROMPT_REV, agentIdentityEnv } from "../chief/paths.js";
 import { resolveWorkspaceDir } from "../defaults.js";
+import { headless } from "./headless/wiring.js";
 
 // Sentinel the launcher sends for a "no repo" agent that runs at the workspace
 // root. A blank/absent repo means the same thing.
@@ -159,6 +160,8 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
   // Chief of staff (spec §5.2): read once, so the record and the env agree.
   // Off, the record and the env are exactly as before.
   const chief = chiefActive();
+  // The --model of the first start (model.ts startModel): the agent's own model, else the setting.
+  const runModel = runtimeId === "claude" ? startModel({ kind: req.kind, model }, { fresh: true }) : undefined;
   const extra: Partial<AgentRecord> = {
     ...(req.kind ? { kind: req.kind } : {}),
     ...(req.issueId ? { issueId: req.issueId } : {}),
@@ -166,6 +169,10 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
     ...(req.spawnedBy ? { spawnedBy: req.spawnedBy } : {}),
     ...(resolved.startedOn && !waits ? { startedOn: resolved.startedOn } : {}),
     ...(waits ? { waitsLogin: { until: waits.until, prompt: prompt ?? "" } } : {}),
+    // Kept until Claude takes it in (store.ts): a start before that sends it again.
+    ...((prompt ?? "").trim() && !waits && runtimeId === "claude" ? { firstPrompt: prompt, firstPromptAt: Date.now() } : {}),
+    // The model of this start (an agent that waits starts later: its start writes it).
+    ...(runModel && !waits ? { runModel } : {}),
   };
   const wantedLabel = (req.label ?? "").trim();
 
@@ -235,6 +242,10 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
       ...(x && folders ? { clone: true as const } : {}),
     };
   }
+  // AGENT_HEADLESS=1 (headless/wiring.ts): a worker runs as `claude -p` with a message stream.
+  const hw = headless();
+  // A headless worker keeps no first message (store.ts firstPrompt): undefined is not saved.
+  if (hw?.eligible(record)) record = { ...record, host: "headless", firstPrompt: undefined, firstPromptAt: undefined };
   try {
     await store.save(record);
     if (waits) {
@@ -245,21 +256,29 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
     // Every agent gets the widgets instruction; worktree agents also get the
     // shared-docs one (plus the issue prompt for kind "issue"). Computed once
     // so prepare() and buildArgs() carry the SAME prompt.
-    const model = runtimeId === "claude" ? startModel(record, { fresh: true }) : undefined;
-    const preset: Preset = { ...(model ? { model } : {}), systemPrompt: agentPrompt(record, resolveWidgetsDataDir(), await chiefPromptFor(record.kind, { repoDir: process.cwd() })) };
+    const preset: Preset = { ...(runModel ? { model: runModel } : {}), systemPrompt: agentPrompt(record, resolveWidgetsDataDir(), await chiefPromptFor(record.kind, { repoDir: process.cwd() })) };
     const prepared = await runtime.prepare(record, {
       port, workspaceDir, systemPrompt: preset.systemPrompt, accounts,
     });
     const { settingsPath } = prepared;
     // The identity is merged into the runtime's env, never replacing it.
     const env = chief ? { ...(prepared.env ?? {}), ...agentIdentityEnv(record) } : prepared.env;
-    const args = runtime.buildArgs(preset, { prompt: prompt ?? "", settingsPath, cwd, promptSnapshotOff: chief });
-    // persist: host the CLI in a detached dtach session so it survives a restart.
-    terminals.spawn({ id, cwd, args, command: runtime.bin(), env, persist: true });
+    if (record.host === "headless" && hw) {
+      // The prompt is the first message of the stream, not an arg.
+      const args = runtime.buildArgs(preset, { prompt: "", settingsPath, cwd, promptSnapshotOff: chief });
+      await hw.launch(id, { cwd, args, command: runtime.bin(), env, settingsPath });
+      await hw.first(id, prompt);
+    } else {
+      const args = runtime.buildArgs(preset, { prompt: prompt ?? "", settingsPath, cwd, promptSnapshotOff: chief });
+      // persist: host the CLI in a detached dtach session so it survives a restart.
+      const bin = runtime.bin();
+      terminals.spawn({ id, cwd, args, command: bin, env, persist: true, helperLaunch: runtime.helperLaunch?.(bin, args) });
+    }
   } catch (e) {
     // A failed prepare or spawn must not become a record that boot recovery
     // retries forever. Remove every side effect created for this launch.
-    terminals.kill(id);
+    if (record.host === "headless" && hw) await hw.remove(id);
+    else terminals.kill(id);
     if (record.repo) {
       try { await discard(record); } catch { /* best-effort cleanup */ }
     } else {

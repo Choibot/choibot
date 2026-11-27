@@ -47,10 +47,12 @@ describe("claude prepare: the hook settings write", () => {
   }
   // Hardened deployment with the helper probe passed (agent uid spawns).
   const hardened = () => { for (const [k, v] of Object.entries(HARDENED)) vi.stubEnv(k, v); setAgentHelper(true); };
-  // The hooks and the compact window of the kind (compact.ts): a master 300000, a worker 200000.
+  // The hooks, the compact window of the kind (compact.ts): a master 300000, a worker 200000,
+  // and the key that skips the bypass dialog of --dangerously-skip-permissions.
   const want = (r: AgentRecord) => JSON.stringify({
     ...buildHookSettings({ agentId: r.id, token: r.hookToken, port: 3999 }),
     env: { CLAUDE_CODE_AUTO_COMPACT_WINDOW: r.kind === "fleet-master" ? "300000" : "200000" },
+    skipDangerousModePermissionPrompt: true,
   });
   const ctx = { port: 3999, workspaceDir: "/ws-unused" };
 
@@ -90,13 +92,13 @@ describe("claude prepare: the hook settings write", () => {
     });
   }
 
-  it("AGENT_COMPACT_WINDOW=off: the hooks only, as before", async () => {
+  it("AGENT_COMPACT_WINDOW=off: no compact window", async () => {
     const dir = await tmp("agent-dir-");
     vi.stubEnv("AGENT_COMPACT_WINDOW", "off");
     const r = rec({ id: "w1", repo: "/ws/app", worktree: dir, cwd: dir });
     await claudeRuntime.prepare(r, ctx);
     expect(await readFile(join(dir, ".choibot-hooks.json"), "utf8"))
-      .toBe(JSON.stringify(buildHookSettings({ agentId: r.id, token: r.hookToken, port: 3999 })));
+      .toBe(JSON.stringify({ ...buildHookSettings({ agentId: r.id, token: r.hookToken, port: 3999 }), skipDangerousModePermissionPrompt: true }));
   });
 
   it("not hardened: the hooks and the compact window", async () => {
@@ -339,7 +341,8 @@ describe("claude prepare: a lead's folder trust", () => {
     return d;
   }
   const hardened = () => { for (const [k, v] of Object.entries(HARDENED)) vi.stubEnv(k, v); };
-  const BASE = JSON.stringify({ numStartups: 7, projects: { "/ws": { hasTrustDialogAccepted: true } } }, null, 2);
+  // Onboarded already: only the trust mark can change it.
+  const BASE = JSON.stringify({ numStartups: 7, hasCompletedOnboarding: true, projects: { "/ws": { hasTrustDialogAccepted: true } } }, null, 2);
   // The default account's .claude.json holds BASE; a named account "office" has its own.
   async function accountsFx(): Promise<AccountPaths> {
     const base = await tmp("accts-");
@@ -395,15 +398,15 @@ describe("claude prepare: a lead's folder trust", () => {
     expect(await readFile(accounts.defaultClaudeJson, "utf8")).toBe(BASE);
   });
 
-  it("a config that cannot be updated never blocks the spawn (one [chief] warning)", async () => {
+  it("a config that cannot be updated never blocks the spawn ([chief] warnings: onboarding and trust)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     const accounts = await accountsFx();
     await writeFile(accounts.defaultClaudeJson, "{ not json");
     const dir = await tmp("lead-home-");
     expect(await claudeRuntime.prepare(lead(dir), ctx(accounts))).toEqual({ settingsPath: join(dir, ".choibot-hooks.json") });
     expect(await readFile(accounts.defaultClaudeJson, "utf8")).toBe("{ not json");
-    expect(warn).toHaveBeenCalledTimes(1);
-    expect(String(warn.mock.calls[0]![0])).toMatch(/^\[chief\] /);
+    expect(warn).toHaveBeenCalledTimes(2);
+    for (const c of warn.mock.calls) expect(String(c[0])).toMatch(/^\[chief\] /);
   });
 
   it("hardened: no write, with the helper (agent-owned AGENT_CLAUDE_CONFIG_DIR) or without it", async () => {

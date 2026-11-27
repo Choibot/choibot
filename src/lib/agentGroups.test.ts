@@ -15,6 +15,10 @@ describe("leadsOf", () => {
       { area: "a", repos: [], leadId: "lead-a", status: "running" },
     ])).toEqual([{ id: "lead-b", area: "b", status: "idle" }, { id: "lead-a", area: "a", status: "running" }]);
   });
+  it("passes the lead's model and login through for its tag and header", () => {
+    expect(leadsOf([{ area: "a", repos: [], leadId: "lead-a", status: "idle", model: "opus" }])).toEqual([{ id: "lead-a", area: "a", status: "idle", model: "opus" }]);
+    expect(leadsOf([{ area: "a", repos: [], leadId: "lead-a", status: "idle", model: "opus", account: "choibot" }])).toEqual([{ id: "lead-a", area: "a", status: "idle", model: "opus", account: "choibot" }]);
+  });
 });
 
 const L = (id: string) => ({ id, area: id.replace(/^lead-/, ""), status: "idle" });

@@ -105,9 +105,15 @@ export function registerLeadsApi(app: FastifyInstance, d: LeadsApiDeps): void {
     const rows = [];
     for (const [area, e] of Object.entries(await d.areas.read())) {
       const rec = e.leadId ? await d.agents.load(e.leadId) : null;
+      // The model the lead runs on (its last start), for the quiet tag of the list; its login
+      // (absent = the default one), for the hover text and the pane's header.
+      const model = rec?.runModel ?? rec?.model;
+      const account = rec?.account;
       rows.push({
         area, repos: e.repos, leadId: e.leadId ?? null, status: rec?.status ?? null, avatar: e.avatar ?? 0,
         reportAt: await reportAt(area), sessionId: rec?.sessionId ?? null, cwd: rec?.cwd ?? null,
+        ...(model ? { model } : {}),
+        ...(account ? { account } : {}),
         ...(e.leadId && d.waits?.(e.leadId) ? { waits: true, ...(d.waitsLogin?.(e.leadId) ? { waitsLogin: true } : {}) } : {}),
       });
     }

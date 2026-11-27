@@ -29,6 +29,11 @@ describe("fleetMasterSystemPrompt", () => {
     expect(p).toMatch(/\{"repo":"<repo name>","prompt":"\.\.\.","base":"<branch>"\}\nEOF/);
     expect(p).not.toContain("echo '");
   });
+  it("with chief: the spawn example has a title, and one line says to give each worker one", () => {
+    const c = fleetMasterSystemPrompt({ ...OPTS, chief: { brain: "", cli: "/r/node_modules/.bin/tsx /r/bin/choibot.ts" } });
+    expect(c).toMatch(/\{"repo":"<repo name>","title":"<2-5 words>","prompt":"\.\.\.","base":"<branch>"\}\nEOF\n- Give each worker a title of 2 to 5 words that names its task/);
+    expect(p).not.toContain('"title"');
+  });
   it("carries the trust and reply rules", () => {
     expect(p).toContain("AskUserQuestion");
     expect(p).toMatch(/## Forwarded issues/);

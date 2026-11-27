@@ -16,7 +16,7 @@ let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "guide-")); });
 afterEach(() => { rmSync(dir, { recursive: true, force: true }); });
 
-function make(o: { steps?: StepStatus[]; facts?: ActionFacts; answers?: (ModelAnswer | string)[]; limitUntil?: number | null } = {}) {
+function make(o: { steps?: StepStatus[]; facts?: ActionFacts; answers?: (ModelAnswer | string)[]; limitUntil?: number | null; githubApp?: boolean } = {}) {
   const w = {
     steps: o.steps ?? list(BOX_DONE),
     facts: o.facts ?? IDLE,
@@ -32,6 +32,7 @@ function make(o: { steps?: StepStatus[]; facts?: ActionFacts; answers?: (ModelAn
     facts: async () => w.facts,
     model: w.model,
     limitUntil: async () => o.limitUntil ?? null,
+    ...(o.githubApp ? { githubApp: true } : {}),
     now: () => w.now++,
     log: (s) => w.logs.push(s),
   });
@@ -60,6 +61,21 @@ describe("the fixed lines: the welcome and the next step, with no model", () => 
     expect((v.items[1] as { text: string }).text).toBe("Next: Connect GitHub. Your agents open pull requests with your GitHub account.");
     expect(kinds((await w.guide.sync()).items)).toEqual(["guide", "guide", "card:github"]);
     expect(w.model.calls).toHaveLength(0);
+  });
+
+  it("one count with the page: with the ChoiBot app, GitHub and the repo are one step", async () => {
+    // Each welcome is the first sync of a new guide (a new folder).
+    const welcome = async (o: Parameters<typeof make>[0]) => {
+      rmSync(dir, { recursive: true, force: true });
+      dir = mkdtempSync(join(tmpdir(), "guide-"));
+      return ((await make(o).guide.sync()).items[0] as { text: string }).text;
+    };
+    expect(await welcome({ githubApp: true })).toMatch(/I am the guide\. 4 of 7 steps are done\. 3 steps are left\./);
+    // GitHub approved, no repo yet: the one step is not done (the page says "Step 5 of 7").
+    const half = list({ ...BOX_DONE, github: "done" });
+    expect(await welcome({ githubApp: true, steps: half })).toMatch(/4 of 7 steps are done\. 3 steps are left\./);
+    expect(await welcome({ steps: half })).toMatch(/5 of 8 steps are done\. 3 steps are left\./);
+    expect(await welcome({ githubApp: true, steps: list({ ...BOX_DONE, github: "done", repo: "done" }) })).toMatch(/5 of 7 steps are done\. 2 steps are left\./);
   });
 
   it("says when a step is done, with the note of its check, and goes to the next step", async () => {

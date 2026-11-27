@@ -93,6 +93,24 @@ describe("the Update ticket", () => {
     expect(t.deploy?.update).toMatchObject({ state: "failed-back", step: "health" });
   });
 
+  it("GET /api/deploy carries the last press, also after its ticket closed (the page follows it)", async () => {
+    status({ mode: "check", result: "available", installed: { version: 848, commit: A848 }, available: offer(849, B849) });
+    const svc = service();
+    await svc.check();
+    expect((await svc.statusNow()).press).toBeNull();
+    await svc.start("tab");
+    expect((await svc.statusNow()).press).toMatchObject({ state: "asked", from: 848, to: 849 });
+    rmSync(join(dir, "update", "ask"));
+    now += 5_000;
+    status({ mode: "ask", result: "running", step: "stage", tried: { version: 849, commit: B849 }, installed: { version: 848, commit: A848 }, available: offer(849, B849) });
+    expect((await svc.statusNow()).press).toMatchObject({ state: "running", step: "stage" });
+    now += 60_000;
+    status({ mode: "ask", result: "failed-back", step: "health", tried: { version: 849, commit: B849 }, installed: { version: 848, commit: A848 }, available: null });
+    const s = await svc.statusNow();
+    expect(s.ticketId).toBeNull();
+    expect(s.press).toMatchObject({ state: "failed-back", step: "health", from: 848, to: 849 });
+  });
+
   it("after a failure: no ticket again for that version; a higher one makes a new ticket", async () => {
     status({ mode: "check", result: "available", installed: { version: 848, commit: A848 }, available: offer(849, B849) });
     const svc = service();

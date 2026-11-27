@@ -106,11 +106,12 @@ function firstError(v: FirstView): string | null {
   const a = v.agent;
   if (!a || v.ticket?.state === "open" || v.ticket?.state === "merged") return null;
   if (v.ticket) return "The pull request of the first agent was closed and not merged.";
+  if (a.noSession && (a.state === "working" || a.state === "waiting")) return "The first agent has no session yet. Claude may wait for an answer on its terminal screen.";
   switch (a.state) {
     case "working": return null;
     case "waiting": return a.pullRequest
       ? "The first agent opened a pull request, but its ticket did not come to the Queue."
-      : "The first agent stopped and opened no pull request. It can wait for an answer in its thread.";
+      : "The first agent stopped and opened no pull request.";
     case "error": return "The first agent stopped with an error.";
     case "ended": return "The first agent ended and opened no pull request.";
     case "closed": return "The first agent was closed before it opened a pull request.";

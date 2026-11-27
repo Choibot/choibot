@@ -32,7 +32,7 @@ import { AccountLine } from "../components/AccountBar";
 import { UsageMeter } from "../components/UsageMeter";
 import { FileIcon, PlusIcon } from "../components/SideIcons";
 import { PhoneHeader, PhonePillButton } from "../components/PhoneHeader";
-import { fetchAgent, type AgentSession } from "../lib/agents";
+import { agentModel, fetchAgent, type AgentSession } from "../lib/agents";
 import { limitWord } from "../lib/accounts";
 import { fetchEditorOff } from "../lib/brain";
 import { recurringLevel, spoolWaiting } from "../lib/cron";
@@ -110,6 +110,13 @@ export default function Page() {
   // briefly target its worktree), and no frame with no name in the header.
   const knownAgent = (id: string): AgentSession | null => agentRecords.get(id) ?? listedAgent(id) ?? null;
   const selectedAgent = !agentId ? null : agentRecord?.id === agentId ? agentRecord : knownAgent(agentId);
+  // A worker's new title (its pane's Rename, or a rename from elsewhere): the remembered record and
+  // the shown one take it, so a later open shows no old name first. The list updates itself.
+  const onAgentRenamed = (id: string, title: string) => {
+    const a = agentRecords.get(id);
+    if (a) agentRecords.set(id, { ...a, label: title });
+    setSelectedAgent((r) => (r && r.id === id ? { ...r, label: title } : r));
+  };
   useEffect(() => {
     setSelectedAgent(agentId ? knownAgent(agentId) : null);
     if (!agentId) return;
@@ -176,7 +183,7 @@ export default function Page() {
       {leadSel.id === COORDINATOR_ID
         ? <AgentPane key={leadSel.id} agentId={leadSel.id} label="Coordinator" idleText="Waiting for events" queue={queue} onBack={onBack} />
         : leadSel.waits ? <WaitsForSignIn who="This lead" onSetup={goHome} login={leadSel.waitsLogin === true} />
-        : <AgentPane key={leadSel.id} agentId={leadSel.id} label={`Lead · ${leadSel.area}`} status={leadSel.status} queue={queue} onBack={onBack} avatar={<LeadAvatar area={leadSel.area} size={36} />} />}
+        : <AgentPane key={leadSel.id} agentId={leadSel.id} label={`Lead · ${leadSel.area}`} status={leadSel.status} model={leadSel.model} account={leadSel.account} queue={queue} onBack={onBack} avatar={<LeadAvatar area={leadSel.area} size={36} />} />}
     </div></div>
   );
   // "Open agent" on a ticket: the thread of its agent (a worker, a lead or the fleet master).
@@ -240,8 +247,9 @@ export default function Page() {
   const setupNav: SetupNav = {
     go: (id) => openSettings(id),
     onNewAgent: () => setLauncherOpen(true),
+    // The agent with no session file: its pane shows the terminal (lib/thread shownMode).
+    onOpenTerminal: (id) => { setTab("agents"); selectAgent(id); },
     ...(queueShown ? { onOpenQueue: () => { setTab("agents"); openQueue(); } } : {}),
-    onOpenAgent: (id) => { setTab("agents"); selectAgent(id); },
     onLeave: leaveSetup,
   };
   // A workspace (no-repo) agent runs at the workspace root: no branch/base, and
@@ -257,7 +265,7 @@ export default function Page() {
       <>
         <div className={s.termStack} style={{ display: docsOpen && selectedAgent?.worktree ? "none" : "flex" }}>
           <div className={s.termFill}>
-            <AgentPane key={agentId} agentId={agentId} label={selectedAgent?.label} branch={selectedAgent?.head ?? selectedAgent?.branch} status={selectedAgent?.status} stateWord={selectedAgent ? limitWord(selectedAgent) : null} canStop queue={queue} {...pane} />
+            <AgentPane key={agentId} agentId={agentId} label={selectedAgent?.label} branch={selectedAgent?.head ?? selectedAgent?.branch} status={selectedAgent?.status} stateWord={selectedAgent ? limitWord(selectedAgent) : null} model={selectedAgent ? agentModel(selectedAgent) : undefined} account={selectedAgent?.account} onRenamed={(t) => onAgentRenamed(agentId, t)} canStop queue={queue} {...pane} />
           </div>
         </div>
         {docsOpen && selectedAgent?.worktree && <DocsPanel key={agentId} root={selectedAgent.worktree} />}

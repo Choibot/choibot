@@ -10,6 +10,7 @@ import {
 } from "../../lib/setupActions";
 import { ExternalIcon, RefreshIcon } from "../SideIcons";
 import { cx as k } from "../settings/kit";
+import { Pending } from "./Fold";
 import c from "./Setup.module.css";
 
 const POLL_MS = 1000;
@@ -151,7 +152,7 @@ export function RepoStep({ onDone }: { onDone: () => Promise<void> }) {
             onClick={() => void read(q.trim(), 0, { fresh: true })}><RefreshIcon size={14} /></button>
         </div>
         {listErr && <p className={c.error} role="alert">{listErr} Press the arrows to read it again.</p>}
-        {list === null && !listErr && <p className={c.listNote}>Reading your repos from GitHub…</p>}
+        {list === null && !listErr && <Pending className={c.listNote}>Reading your repos from GitHub…</Pending>}
         {none && <p className={c.listNote}>GitHub shows no repo for this account. Make a repo on github.com, or ask the owner of a repo for push access. Then press the arrows to read the list again.</p>}
         {list !== null && !none && rows.length === 0 && <p className={c.listNote}>No repo has “{list.q}” in its name.</p>}
         {rows.length > 0 && (

@@ -1,4 +1,5 @@
 import { claudeRuntime } from "./runtimes/claude.js";
+import { onboardedLaunch } from "./runtimes/claude-trust.js";
 import { describe, it, expect, afterEach, vi } from "vitest";
 import { mkdtemp, mkdir, writeFile, readFile, appendFile, rm, lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -20,6 +21,7 @@ import { NO_MERGE_RULE } from "../chief/brain/prompt.js";
 import { queueAgentPrompt } from "../chief/queue/prompt.js";
 import { chiefCli } from "../chief/paths.js";
 import { CHIEF_PROMPT_REV } from "../chief/paths.js";
+import { settingModel } from "./model.js";
 
 describe("claudeTranscriptPath", () => {
   it("maps a worktree cwd + session id to the claude jsonl path", () => {
@@ -104,7 +106,7 @@ describe("shouldResume", () => {
     expect(shouldResume({ ...base, sessionId: null }, true)).toBe(false));
 });
 
-type Spawned = { id: string; cwd: string; args: string[]; env?: Record<string, string> };
+type Spawned = { id: string; cwd: string; args: string[]; env?: Record<string, string>; command?: string; helperLaunch?: { command: string; args: string[] } };
 
 function fakeCtx(recs: AgentRecord[], aliveIds = new Set<string>()) {
   const spawned: Spawned[] = [];
@@ -131,6 +133,71 @@ function rec(over: Partial<AgentRecord>): AgentRecord {
 }
 
 describe("resumeAgent", () => {
+  it("a claude relaunch carries the onboarding launcher for the helper route, with the same argv", async () => {
+    const r1 = rec({ id: "r1" });
+    const { ctx, spawned } = fakeCtx([r1]);
+    await resumeAgent(r1, ctx);
+    expect(spawned[0].command).toBe(claudeRuntime.bin());
+    expect(spawned[0].helperLaunch).toEqual(onboardedLaunch(claudeRuntime.bin(), spawned[0].args));
+  });
+
+  // The live fault: agent 1 was killed and started again before its first turn, with no prompt.
+  it("a start with no session to resume sends the kept first message; a resume does not; a new prompt wins", async () => {
+    const SID = "11111111-1111-4111-8111-111111111111";
+    const cases = [
+      { resumes: false, opts: {}, want: "the task", not: null },
+      { resumes: true, opts: {}, want: null, not: "the task" },
+      { resumes: false, opts: { prompt: "a new message" }, want: "a new message", not: "the task" },
+    ] as const;
+    try {
+      for (const c of cases) {
+        vi.spyOn(claudeRuntime, "canResume").mockResolvedValue(c.resumes);
+        const r1 = rec({ id: "r1", sessionId: SID, firstPrompt: "the task" });
+        const { ctx, spawned } = fakeCtx([r1]);
+        await resumeAgent(r1, ctx, c.opts);
+        if (c.want) expect(spawned[0].args.at(-1)).toBe(c.want);
+        if (c.not) expect(spawned[0].args).not.toContain(c.not);
+        expect(spawned[0].args.includes("--resume")).toBe(c.resumes);
+      }
+    } finally { vi.restoreAllMocks(); }
+  });
+
+  it("a cold start that sends the kept first message writes when (firstPromptAt); a resume does not", async () => {
+    try {
+      for (const resumes of [false, true]) {
+        vi.spyOn(claudeRuntime, "canResume").mockResolvedValue(resumes);
+        const r1 = rec({ id: "r1", sessionId: "11111111-1111-4111-8111-111111111111", firstPrompt: "the task", firstPromptAt: 5 });
+        const { ctx } = fakeCtx([r1]);
+        const patches: Partial<AgentRecord>[] = [];
+        (ctx.store as { patch: unknown }).patch = async (_id: string, p: Partial<AgentRecord>) => { patches.push(p); };
+        const t0 = Date.now();
+        await resumeAgent(r1, ctx);
+        const at = patches.at(-1)?.firstPromptAt;
+        if (resumes) expect(at).toBeUndefined();
+        else expect(at).toBeGreaterThanOrEqual(t0);
+      }
+    } finally { vi.restoreAllMocks(); }
+  });
+
+  // main sent nothing at a Codex cold start; a Codex agent whose hook plugin fails never
+  // clears the message, so it would get its first task again at each start.
+  it("a codex agent's cold start sends no kept first message", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "recovery-codex-fp-"));
+    const prev = process.env.CODEX_EXECUTABLE;
+    process.env.CODEX_EXECUTABLE = join(dir, "no-such-codex");
+    try {
+      const cx = rec({ id: "cxp", repo: "/r", worktree: dir, cwd: dir, runtime: "codex", firstPrompt: "the task" });
+      const { ctx, spawned } = fakeCtx([cx]);
+      await resumeAgent(cx, ctx);
+      expect(spawned).toHaveLength(1);
+      expect(spawned[0].args.join(" ")).not.toContain("the task");
+    } finally {
+      if (prev === undefined) delete process.env.CODEX_EXECUTABLE;
+      else process.env.CODEX_EXECUTABLE = prev;
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
   it("re-applies the fleet master prompt at the master's own cwd", async () => {
     const fleet = rec({
       id: "fleet-master", label: "Master", repo: "", worktree: "/data/master/agent",
@@ -408,7 +475,8 @@ describe("resumeAgent chief identity", () => {
       (ctx as { store: SessionStore }).store = store;
       await resumeAgent(r, ctx);
       expect(patch).toHaveBeenCalledTimes(1);
-      expect(patch).toHaveBeenCalledWith("rv-on", { status: "idle", chiefRev: CHIEF_PROMPT_REV });
+      // runModel: the --model of this start (no own model: the console's setting, Opus by default).
+      expect(patch).toHaveBeenCalledWith("rv-on", { status: "idle", chiefRev: CHIEF_PROMPT_REV, runModel: settingModel().model });
       expect((await rawRecord(dir, "rv-on")).chiefRev).toBe(CHIEF_PROMPT_REV);
     });
   });

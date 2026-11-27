@@ -10,6 +10,10 @@ export type LeadRow = {
   waits?: boolean;
   // That wait is for a Claude login that was signed out in Settings.
   waitsLogin?: boolean;
+  // The model the lead runs on (its last start); absent when the console does not know it.
+  model?: string;
+  // The Claude login the lead runs under; absent = the default one.
+  account?: string;
 };
 
 // The areas that have a lead, each with its avatar pick: what LeadAvatar and the Queue need to

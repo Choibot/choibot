@@ -3,9 +3,7 @@
 // user (chiefFetch). Pure functions here; the hook is lib/useGuide.ts.
 import { findSecret, stoppedLine, type SecretHit } from "../../server/guide/secret";
 import type { GuideItem, GuideOff, GuideView } from "../../server/guide/types";
-import type { StepId } from "../../server/setup/steps";
 import { chiefFetch } from "./chief";
-import type { SetupRow } from "./setup";
 
 export type { GuideItem, GuideOff, GuideView };
 
@@ -100,32 +98,10 @@ export const guideClosed = (off: GuideOff | undefined): boolean => off !== undef
 // The page waits this long for an answer of the guide. The server ends a turn before that
 // (its own limit is 90 seconds), so "writes…" never stays for ever.
 export const BUSY_MAX_MS = 120_000;
+
 export const BUSY_LATE_TEXT = "The guide did not answer. Ask again, or use the list.";
 
 // ---------------------------------------------------------------- the thread
-
-// How a card of the thread shows. live: the form or the button of the step, the same part as
-// in the row of the list. done: the step is done (the note of its check). waits: a step before
-// it is open. old: a newer card of the same step is below it.
-export type CardMode = "live" | "done" | "waits" | "old" | "checking";
-
-// One card per step is live: the last one of the thread, and only while the step is open.
-export function cardModes(items: GuideItem[], rows: SetupRow[]): Map<string, CardMode> {
-  const byStep = new Map<StepId, SetupRow>(rows.map((r) => [r.id, r]));
-  const last = new Map<StepId, string>();
-  for (const i of items) if (i.kind === "card") last.set(i.step, i.id);
-  const out = new Map<string, CardMode>();
-  for (const i of items) {
-    if (i.kind !== "card") continue;
-    const row = byStep.get(i.step);
-    if (last.get(i.step) !== i.id) out.set(i.id, "old");
-    else if (!row || row.state === "checking") out.set(i.id, "checking");
-    else if (row.state === "done") out.set(i.id, "done");
-    else if (row.state === "waits") out.set(i.id, "waits");
-    else out.set(i.id, "live");
-  }
-  return out;
-}
 
 // Who speaks: the thread says it one time for each run of items of the same side.
 export const sideOf = (i: GuideItem): "you" | "guide" => (i.kind === "user" ? "you" : "guide");

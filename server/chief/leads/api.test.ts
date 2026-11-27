@@ -181,6 +181,22 @@ describe("GET /api/leads", () => {
     expect(app2).not.toHaveProperty("waits");
   });
 
+  it("gives the lead's model for its tag (the model of its last start, else the record's model) and its login", async () => {
+    await areas.set("app-shop", { repos: ["app-shop"], leadId: "lead-app-shop" });
+    const row = async () => (await app.inject({ method: "GET", url: "/api/leads", headers: hdr("w1") })).json().find((x: any) => x.area === "app-shop");
+    expect(await row()).not.toHaveProperty("model");
+    expect(await row()).not.toHaveProperty("account");
+    const saved = RECORDS["lead-app-shop"];
+    try {
+      RECORDS["lead-app-shop"] = { ...saved, model: "sonnet" };
+      expect(await row()).toMatchObject({ model: "sonnet" });
+      RECORDS["lead-app-shop"] = { ...saved, model: "sonnet", runModel: "opus" };
+      expect(await row()).toMatchObject({ model: "opus" });
+      RECORDS["lead-app-shop"] = { ...saved, account: "choibot" };
+      expect(await row()).toMatchObject({ account: "choibot" });
+    } finally { RECORDS["lead-app-shop"] = saved; }
+  });
+
   it("a lead that waits for the second sign-in says so in its row (the page reads it, never guesses it)", async () => {
     await areas.set("app-shop", { repos: ["app-shop"], leadId: "lead-app-shop" });
     waiting = new Set(["lead-app-shop"]);

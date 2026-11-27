@@ -24,7 +24,7 @@ export type GuideHook = {
   // The guide wrote for longer than the page waits: one plain line, and the box is free again.
   late: boolean;
   send: (text: string) => Promise<SendResult>;
-  // The list changed (a card's action ended): let the guide say what is new.
+  // The list changed (the action of a step ended): let the guide say what is new.
   sync: () => void;
 };
 

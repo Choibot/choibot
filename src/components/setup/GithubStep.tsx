@@ -14,6 +14,7 @@ import {
 import type { SetupRow } from "../../lib/setup";
 import { ExternalIcon } from "../SideIcons";
 import { cx as k } from "../settings/kit";
+import { Pending } from "./Fold";
 import c from "./Setup.module.css";
 
 const POLL_MS = 3000;
@@ -32,7 +33,7 @@ function CommitName({ onDone }: { onDone: () => Promise<void> }) {
     setBusy(true); setErr("");
     try { await saveCommitName(); await onDone(); } catch (e) { setErr((e as Error).message); } finally { setBusy(false); }
   };
-  if (!view) return err ? <p className={c.error} role="alert">{err}</p> : <p className={c.today}>Reading your GitHub account…</p>;
+  if (!view) return err ? <p className={c.error} role="alert">{err}</p> : <Pending className={c.today}>Reading your GitHub account…</Pending>;
   if (!view.suggest) return <p className={c.today}>GitHub gave no account to take the name from. Press Check again.</p>;
   return (
     <>
@@ -182,7 +183,7 @@ export function GithubStep({ row, onDone, place = "setup" }: { row: SetupRow; on
       </>
     );
   }
-  if (view === null) return <p className={c.today}>Reading the state of the login…</p>;
+  if (view === null) return <Pending className={c.today}>Reading the state of the login…</Pending>;
   if (view.state === "waiting") return <CodeCard view={view} busy={busy} place={place} onFresh={() => void start(true)} />;
   const failed = view.state === "failed" ? view.reason : null;
   const app = view.app ?? null;

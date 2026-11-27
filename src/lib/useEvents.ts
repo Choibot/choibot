@@ -13,6 +13,7 @@ export type ConsoleEvent =
   | { type: "agent-notify"; agentId: string; level: "info" | "attention" | "error"; text: string }
   | { type: "agent-reopened"; agentId: string }
   | { type: "agent-closed"; agentId: string }
+  | { type: "agent-renamed"; agentId: string; label: string }
   | { type: "agent-turn-end"; agentId: string; lastMessage: string }
   | { type: "agent-hook"; agentId: string; event: string; source?: string }
   // Mirrors AgentPromptEvent in server/events.ts. A terminal dialog appeared,

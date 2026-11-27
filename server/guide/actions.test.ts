@@ -77,8 +77,10 @@ describe("lastError", () => {
     const view = (state: string, extra = {}) => ({ ...IDLE, first: { task: "t", repo: "shop", now: 9, ticket: null, agent: { id: "a1", name: "First task", state, startedAt: 1, pullRequest: false, ...extra } } as never });
     expect(actionError(agent, view("working"))).toBeNull();
     expect(actionError(agent, view("waiting"))).toMatch(/stopped and opened no pull request/);
+    expect(actionError(agent, view("waiting"))).not.toMatch(/thread/);
     expect(actionError(agent, view("error"))).toMatch(/stopped with an error/);
     expect(actionError(agent, view("waiting", { pullRequest: true }))).toMatch(/ticket did not come/);
+    expect(actionError(agent, view("working", { noSession: true }))).toBe("The first agent has no session yet. Claude may wait for an answer on its terminal screen.");
     expect(actionError(agent, { ...IDLE, first: { task: "t", repo: "shop", repos: ["shop"], now: 9, agent: null, ticket: null } })).toBeNull();
   });
 });

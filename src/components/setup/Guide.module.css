@@ -1,31 +1,14 @@
 /* src/components/setup/Guide.module.css — the guide on the Set-up page (A · Inset): the thread
-   in one centred column with the box under it, the list next to it. The bubbles, the "who" line
-   and the box are the ones of the agent thread (ThreadView.module.css, Composer.module.css).
-   Tokens only (globals.css). */
-
-/* Desktop, wide: the guide fills, the list is a column at the right. Narrow: one of the two. */
-.split { flex: 1; min-height: 0; display: flex; }
-.side { flex: none; width: 400px; min-height: 0; overflow-y: auto; border-left: 1px solid var(--line); background: var(--bg-0); }
-.sideInner { padding: 20px 20px 48px; }
-.split[data-wide="false"] .side { flex: 1; width: auto; border-left: 0; background: var(--bg-1); }
-.split[data-wide="false"] .sideInner { max-width: 680px; margin: 0 auto; padding: 24px 28px 56px; }
-/* The switch between the guide and the list (a narrow page, the phone header). */
-.switch { flex: none; margin-left: auto; align-self: center; display: inline-flex; padding: 2px; border-radius: var(--radius-sm); background: var(--bg-2); line-height: 1; }
-.switch button {
-  height: 24px; padding: 0 10px; border: 0; border-radius: 5px; background: none; color: var(--ink-1);
-  font: var(--weight-medium) var(--text-xs) var(--font-sans); cursor: pointer; white-space: nowrap;
-}
-.switch button[aria-pressed="true"] { background: var(--bg-1); color: var(--ink-0); box-shadow: 0 0 0 1px var(--line); }
-.switch button:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
-.pillBtn { border: 0; cursor: pointer; font-family: var(--font-sans); touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
-.pillBtn:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: 1px; }
+   in one centred column with the box under it, in a column next to the stage or in a sheet. The
+   bubbles, the "who" line and the box are the ones of the agent thread (ThreadView.module.css,
+   Composer.module.css). Tokens only (globals.css). */
 
 .pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--bg-1); padding-bottom: 14px; }
 .scroll { flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; display: flex; flex-direction: column; }
 /* A short thread sits at the bottom, next to the box. */
 .col {
   margin: auto auto 0; width: 100%; max-width: calc(680px + 48px); min-width: 0; padding: 24px 24px 14px;
-  display: flex; flex-direction: column; gap: 12px;
+  --col-gap: 12px; display: flex; flex-direction: column; gap: var(--col-gap);
   font-family: var(--font-sans); font-size: var(--text-base); line-height: 1.55; color: var(--ink-0);
 }
 .box { padding: 0 24px; max-width: calc(680px + 48px); }
@@ -48,16 +31,10 @@
 .chip[data-kind="error"] { border-color: color-mix(in srgb, var(--warn) 45%, var(--line)); }
 .chip[data-kind="error"] .chipText { color: var(--warn); }
 
-/* A card: the form or the button of a step, the same part as in the list. */
-.card { display: grid; gap: 10px; padding: 12px 14px 14px; border: 1px solid var(--line-2); border-radius: var(--radius); background: var(--bg-1); min-width: 0; }
-.cardHead { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.cardTitle { flex: 1; min-width: 0; font-size: var(--text-base); font-weight: var(--weight-semibold); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.cardWord { flex: none; color: var(--ink-2); font-size: var(--text-xs); white-space: nowrap; }
-.card[data-mode="live"] .cardWord { color: var(--ink-0); font-weight: var(--weight-medium); }
-.card .cardBody { gap: 10px; min-width: 0; }
-.cardLine { margin: 0; color: var(--ink-1); font-size: var(--text-sm); }
-.card[data-mode="done"], .card[data-mode="waits"], .card[data-mode="checking"] { background: var(--bg-0); border-color: var(--line); }
-.stub { margin: 0; color: var(--ink-2); font-size: var(--text-xs); }
+/* The folds of the thread (Fold.tsx). A closed fold takes no gap: its frame pulls up by one gap
+   and its part gives the gap back inside. A new line of the thread folds in with its head. */
+.foldLine { margin-top: calc(-1 * var(--col-gap)); }
+.foldLineIn { display: flex; flex-direction: column; gap: var(--col-gap); padding-top: var(--col-gap); }
 
 /* A message that the guard stopped: where the secret belongs. Never the text. */
 .stop {
@@ -76,8 +53,7 @@
 
 /* Phone: the thread on the canvas, touch sizes. */
 .pane[data-phone] { background: var(--bg-0); padding-bottom: 0; }
-.pane[data-phone] .col { padding: 16px 16px 12px; gap: 11px; font-size: var(--text-phone-body); }
+.pane[data-phone] .col { padding: 16px 16px 12px; --col-gap: 11px; font-size: var(--text-phone-body); }
 .pane[data-phone] .box { padding: 6px 16px max(8px, env(safe-area-inset-bottom, 0px)); max-width: none; }
-.pane[data-phone] .chip, .pane[data-phone] .stop, .pane[data-phone] .note, .pane[data-phone] .cardLine { font-size: var(--text-phone-sm); }
-.pane[data-phone] .cardTitle { font-size: var(--text-phone-body); }
+.pane[data-phone] .chip, .pane[data-phone] .stop, .pane[data-phone] .note { font-size: var(--text-phone-sm); }
 .pane[data-phone] .text { font-size: var(--text-phone-body); }

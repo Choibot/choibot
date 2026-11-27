@@ -34,6 +34,9 @@ async function waitValue<T>(produce: () => Promise<T | null>, ms = 6000): Promis
   }
 }
 
+// A wait for a real child process (node in a pty) when the whole set runs and the machine is busy.
+const SLOW = 15_000;
+
 function waitFor(pred: () => boolean, ms = 4000): Promise<void> {
   return new Promise((res, rej) => {
     const t0 = Date.now();
@@ -232,6 +235,18 @@ describe("TerminalManager persistence (dtach)", () => {
     mgr.kill(id);
   });
 
+  it("a direct spawn runs its own command: the launcher for the helper route is ignored", async () => {
+    const id = `direct-launch-${Date.now()}`;
+    const mgr = new TerminalManager();
+    mgr.spawn({
+      id, cwd: process.cwd(), command: "bash", args: ["-lc", "printf 'DIRECT_RUN\\n'; sleep 30"], persist: true,
+      helperLaunch: { command: "bash", args: ["-lc", "printf 'HELPER_RUN\\n'; sleep 30"] },
+    });
+    await waitFor(() => (mgr.attach(id)?.snapshot ?? "").includes("DIRECT_RUN"), SLOW);
+    expect(mgr.attach(id)!.snapshot).not.toContain("HELPER_RUN");
+    mgr.kill(id);
+  }, 30_000);
+
   it("a fresh manager reattaches to a persisted session it never spawned, and can drive it", async () => {
     const id = `persist-${Date.now()}-a`;
     // Manager #1 spawns the session (cat echoes stdin and stays alive).
@@ -298,6 +313,83 @@ describe("TerminalManager persistence (dtach)", () => {
     b.kill(id);
     await waitFor(() => false, 200).catch(() => {});
   });
+
+  // Claude draws again only on a real size change (claude 2.1.332): dtach's own attach redraw is a
+  // SIGWINCH at the same size. This program does the same (node's "resize" event).
+  const SIZE_PRINTER = [
+    "-e",
+    "process.stdout.write('RESIZE_READY\\n');" +
+      "process.stdout.on('resize', () => process.stdout.write('SIZE ' + process.stdout.columns + 'x' + process.stdout.rows + '\\n'));" +
+      "setInterval(() => {}, 1e6);",
+  ];
+  const sizes = (s: string): string[] => [...s.matchAll(/SIZE (\d+x\d+)/g)].map((m) => m[1]);
+
+  // A session left by a console that stopped, at the console's 120x30, and a new console's
+  // reattach of it, with the agent's output from then on.
+  async function reattached(name: string) {
+    const id = `${name}-${Date.now()}`;
+    const a = new TerminalManager();
+    a.spawn({ id, cwd: process.cwd(), command: process.execPath, args: SIZE_PRINTER, persist: true });
+    await waitFor(() => (a.attach(id)?.snapshot ?? "").includes("RESIZE_READY"), SLOW);
+    a.shutdown(); // the console stops; the session stays
+    const b = new TerminalManager();
+    const att: Attachment = await waitValue(() => b.reattach(id), SLOW);
+    const out = { live: "" };
+    att.subscribe((c) => { out.live += c; });
+    const end = async () => { b.kill(id); await waitFor(() => false, 200).catch(() => {}); };
+    return { id, b, out, end };
+  }
+  const pause = (ms: number) => waitFor(() => false, ms).catch(() => {});
+
+  // Boot recovery and the services reattach with no client: no size change for them.
+  it("a reattach alone does not change the size of the agent", async () => {
+    const r = await reattached("redraw-none");
+    await pause(900);
+    expect(sizes(r.out.live)).toEqual([]);
+    await r.end();
+  }, 30_000);
+
+  it("a client with no size of its own (redrawSoon) → one row less, then the size back; one time only", async () => {
+    const r = await reattached("redraw-nudge");
+    r.b.redrawSoon(r.id);
+    await waitFor(() => sizes(r.out.live).includes("120x30"), SLOW);
+    r.b.redrawSoon(r.id);
+    await pause(900);
+    expect(sizes(r.out.live)).toEqual(["120x29", "120x30"]);
+    await r.end();
+  }, 30_000);
+
+  it("a client that sends a new size within the wait → only that size, no nudge", async () => {
+    const r = await reattached("redraw-browser");
+    r.b.redrawSoon(r.id);
+    r.b.resize(r.id, 150, 40);
+    await waitFor(() => sizes(r.out.live).includes("150x40"), SLOW);
+    await pause(900);
+    expect(sizes(r.out.live)).toEqual(["150x40"]);
+    await r.end();
+  }, 30_000);
+
+  // The kernel sends no SIGWINCH for a size that does not change: it draws nothing.
+  it("a client that sends the same size (120x30) → the nudge still comes", async () => {
+    const r = await reattached("redraw-same");
+    r.b.redrawSoon(r.id);
+    r.b.resize(r.id, 120, 30);
+    await waitFor(() => sizes(r.out.live).includes("120x30"), SLOW);
+    expect(sizes(r.out.live)).toEqual(["120x29", "120x30"]);
+    await r.end();
+  }, 30_000);
+
+  it("a spawned agent drew for this console: redrawSoon does nothing", async () => {
+    const id = `redraw-spawned-${Date.now()}`;
+    const a = new TerminalManager();
+    a.spawn({ id, cwd: process.cwd(), command: process.execPath, args: SIZE_PRINTER, persist: true });
+    await waitFor(() => (a.attach(id)?.snapshot ?? "").includes("RESIZE_READY"), SLOW);
+    a.redrawSoon(id);
+    await pause(900);
+    expect(sizes(a.attach(id)!.snapshot)).toEqual([]);
+    a.kill(id);
+    await pause(200);
+  }, 30_000);
 
   it("reattach drops a crashed server's leftover client, so it cannot stall the session", async () => {
     const id = `stale-client-${Date.now()}`;
@@ -930,6 +1022,19 @@ describe("TerminalManager through the helper (Phase 2c)", () => {
     }
     expect(fx.calls()).toEqual([]);
   }, 20_000);
+
+  it("a spawn through the helper runs the runtime's launcher (it marks the agent's config, then execs the CLI)", async () => {
+    vi.stubEnv("AGENT_SCOPE", "0");
+    const mgr = new TerminalManager({ agentExec: x });
+    const id = `helper-launch-${Date.now()}`;
+    const launch = { command: "/bin/sh", args: ["-c", "node -e \"$0\"; exec \"$@\"", "/* js */", "claude-bin", "--flag", "a prompt"] };
+    mgr.spawn({ id, cwd: process.cwd(), command: "claude-bin", args: ["--flag", "a prompt"], persist: true, helperLaunch: launch });
+    await waitFor(() => fx.calls().length === 1);
+    const want = helperSpawnCommand(x, { systemdRun: null }, sockOf(id), process.cwd(), "/bin/sh", launch.args);
+    expect(fx.calls()[0].argv).toEqual(want.args);
+    mgr.kill(id);
+    await waitFor(() => !mgr.has(id));
+  });
 
   it("a persisted agent spawn goes through the helper, with the agent env and no console secret", async () => {
     vi.stubEnv("AGENT_SCOPE", "0");

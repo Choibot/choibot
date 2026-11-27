@@ -555,13 +555,13 @@ describe.skipIf(!userSystemd())("HeadlessHost with the fake stream claude", { ti
     expect(r.h.pending("w1")).toEqual([]);
   });
 
-  it("a message above the limit: a too-large result with the limit, no rejection, nothing logged or written; the seam's caller gets not-live; a message at the limit goes (round 3, 2)", async () => {
+  it("a message above the limit: a too-large result with the limit, no rejection, nothing logged or written; the seam's caller gets too-large (PR 3); a message at the limit goes (round 3, 2)", async () => {
     const r = rig();
     removeHost = addHost(r.h);
     await startFake(r.h, "w1");
     const over = await r.h.send("w1", "a".repeat(HEADLESS_MAX_BYTES));
     expect(over).toEqual({ refused: "too-large", bytes: userLine(randomUUID(), "a".repeat(HEADLESS_MAX_BYTES)).length, limit: 1_048_576 });
-    expect(await typeIntoAgentWhy(noTerminal, "w1", "é".repeat(HEADLESS_MAX_BYTES / 4), async () => {})).toBe("not-live");
+    expect(await typeIntoAgentWhy(noTerminal, "w1", "é".repeat(HEADLESS_MAX_BYTES / 4), async () => {})).toBe("too-large");
     expect(r.h.pending("w1")).toEqual([]);
     const just = "b".repeat(HEADLESS_MAX_BYTES - 200);
     expect(await r.h.send("w1", just)).toBe("sent");

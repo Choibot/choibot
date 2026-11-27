@@ -30,7 +30,10 @@ export interface AgentHost {
 // A message above the host's limit (bytes as the host sends it): nothing was logged or written.
 // The terminal has no such limit; each caller of a host's send() must handle it.
 export type TooLarge = { refused: "too-large"; bytes: number; limit: number };
-export type HostSendResult = Exclude<TypeResult, "dialog"> | TooLarge;
+export type HostSendResult = Exclude<TypeResult, "dialog" | "too-large"> | TooLarge;
+
+// The user's line for a "too-large" result (TypeResult): one size for every caller.
+export const TOO_LARGE_TEXT = "The message is too long for this agent (above 1 MB). Send a shorter one.";
 
 const hosts: AgentHost[] = [];
 

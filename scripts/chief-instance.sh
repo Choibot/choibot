@@ -16,7 +16,7 @@
 # up and restart write instance.env from these in the caller's env (give them
 # again on every restart that needs them; an unset one is dropped):
 # CHIEF_ENABLED (default 1), CHIEF_USER_AUTH (default log), CHIEF_FAKE_DISTILL,
-# CHIEF_FAKE_SELFTEST, CHIEF_AGENT_UID, CHIEF_REAL_CLAUDE (with
+# CHIEF_FAKE_SELFTEST, CHIEF_AGENT_UID, AGENT_HEADLESS (=1 only), CHIEF_REAL_CLAUDE (with
 # CLAUDE_CONFIG_DIR), and for a test bot CHIEF_TEST_BOT_TOKEN with
 # CHIEF_TEST_USER_ID, CHIEF_TEST_MASTER_CHAT_ID, CHIEF_TEST_MASTER_THREAD_ID,
 # CHIEF_TEST_CRON_CHAT_ID, CHIEF_TEST_CRON_THREAD_ID (the topic of the recurring results),
@@ -266,6 +266,9 @@ render_env() {
       put AGENT_SUDO_BIN "$sudo_bin"
     fi
     if [ -n "${AGENT_EXEC_HELPER:-}" ]; then put AGENT_EXEC_HELPER "$AGENT_EXEC_HELPER"; fi
+    # Headless workers (server/agents/headless/wiring.ts): the flag only; their folders are in the
+    # instance's data dir (XDG_DATA_HOME above).
+    if [ "${AGENT_HEADLESS:-}" = 1 ]; then put AGENT_HEADLESS 1; fi
     if [ -n "${AGENT_HOME_ROOT:-}" ]; then put AGENT_HOME_ROOT "$AGENT_HOME_ROOT"; fi
     # The second account of strong protection (server/chief/chiefaccount.ts), for the test of its
     # sign-in: its uid, and the Claude and dtach folders inside <root> only.

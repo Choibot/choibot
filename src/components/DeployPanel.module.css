@@ -20,6 +20,7 @@
 .failed > div::before, .done > span::before { content: ""; flex: none; width: 7px; height: 7px; border-radius: 50%; background: var(--err); transform: translateY(-1px); }
 .done > span::before { background: var(--ok); }
 .tail { align-self: stretch; margin: 0; max-height: 220px; overflow: auto; padding: 9px 12px; border-radius: var(--radius-sm); background: var(--bg-2); color: var(--ink-1); font: var(--weight-regular) var(--text-xs)/1.55 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
+.stage { outline: none; }
 .acts { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
 .btn {
   flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 28px; padding: 0 12px;

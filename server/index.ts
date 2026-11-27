@@ -27,6 +27,7 @@ import { reconcileAgents, resumeAgent } from "./agents/recovery.js";
 import { startDeadAgentSweep } from "./agents/sweep.js";
 import { hostOf } from "./agents/host.js";
 import { agentExitHandler } from "./agents/exit.js";
+import { headless, headlessWanted, hookPoster, initHeadless, startHeadless } from "./agents/headless/wiring.js";
 import { reopenIfClosed, resumeClosedWithPrompt, startClosedPurge } from "./agents/closed.js";
 import { getUsage, peekUsage, registerUsageApi, usageWithin } from "./usage.js";
 import { fixedPlaces, makeHealth, registerHealthApi } from "./health/api.js";
@@ -321,10 +322,11 @@ async function main() {
   const promptWatch = !["0", "false"].includes(process.env.AGENT_PROMPT_WATCH ?? "");
 
   // PTY exit → terminal forgotten by the manager; reflect it as status + persist.
+  const exitHandler = agentExitHandler({
+    services: () => services, store, hub, relaunching, quiet: quietExits,
+  });
   const terminals = new TerminalManager({
-    onExit: agentExitHandler({
-      services: () => services, store, hub, relaunching, quiet: quietExits,
-    }),
+    onExit: exitHandler,
     dropUserToken: chief?.active,
     agentExec,
     chiefExec,
@@ -348,6 +350,23 @@ async function main() {
   const upgrade = nextApp.getUpgradeHandler(); // must be after prepare()
 
   const app = Fastify();
+
+  // Headless workers (AGENT_HEADLESS=1; off by default): a new worker runs as `claude -p` with a
+  // stream, in its own scope, not in a terminal. Never in a hardened deployment.
+  if (headlessWanted()) {
+    if (hardenedDeployment()) console.warn("[headless] AGENT_HEADLESS=1 is ignored: the deployment is hardened");
+    else {
+      initHeadless({
+        agentEnv: (id, extra) => terminals.agentEnvOf(id, extra),
+        onExit: exitHandler,
+        load: (id) => store.load(id),
+        postHook: hookPoster(app),
+        tellUser: (id, text) => hub.emitEvent({ type: "agent-error", agentId: id, message: text }),
+      });
+      console.log("[headless] on: new workers start headless (AGENT_HEADLESS=1)");
+    }
+  }
+  let stopHeadlessContinue: (() => void) | undefined;
   const routes = seams.routeDump !== null ? collectRoutes(app) : null;
   // The front proxy (a hosted console, server/frontproxy.ts): the gate runs on the HTTP server's
   // own events, before every listener, route and hook. With no proxy settings it only removes the
@@ -756,6 +775,7 @@ async function main() {
         facts: async () => ({ login: stepLogin().state(), clone: setupRepos.cloneState(), first: await setupFirst.view().catch(() => null) }),
         model: makeGuideModel({ ...modelRun(), runDir: join(dir, "run"), env: process.env }),
         limitUntil: async () => limitUntil(await getUsage(), Date.now()),
+        ...(githubAppOn ? { githubApp: true } : {}),
       }),
     });
   }
@@ -1187,6 +1207,10 @@ async function main() {
     await handle(req.raw, reply.raw);
   });
 
+  // Headless workers first: each worker of the host is taken back (also one whose program ended
+  // while the console was down: its exit comes now). Then the auto-continue after a limit.
+  stopHeadlessContinue = (await startHeadless(store, agentApi.limitOps)) ?? undefined;
+
   // Reconcile persisted agents against surviving dtach sessions.
   // Agents whose session outlived the previous server stay running (and reattach lazily when
   // viewed); agents marked running but whose session is gone are demoted so the
@@ -1274,6 +1298,7 @@ async function main() {
     try { stopLimit?.(); } catch { /* best effort */ }
     try { stopCardPoster?.(); } catch { /* best effort */ }
     try { terminals.shutdown(); } catch { /* best effort */ }
+    try { stopHeadlessContinue?.(); headless()?.shutdown(); } catch { /* best effort */ }
     try { promptWatcher.dispose(); } catch { /* best effort */ }
     // After close no request can bump a device's lastUsedAt: flush the rest.
     void app.close()

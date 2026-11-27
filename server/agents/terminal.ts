@@ -20,6 +20,9 @@ type SpawnOpts = {
   // When true the command is hosted inside a detached dtach session so it
   // outlives this server process; a restart reattaches via reattach(id).
   persist?: boolean;
+  // The command for a spawn through the helper only (AgentRuntime.helperLaunch): in place of
+  // `command` and `args` there; a direct spawn ignores it.
+  helperLaunch?: { command: string; args: string[] };
 };
 export type Attachment = {
   // What to write first: all retained history, or only the part after `resume`.
@@ -83,7 +86,20 @@ type Term = {
   // arrive right after we replay history and blank it. When true, strip a
   // leading clear from the first chunk so the replay survives.
   stripClear: boolean;
+  // The agent drew its screen for this console: a spawn, a real change of size, or a nudge.
+  // False after a reattach (redrawSoon()).
+  drawn: boolean;
+  // redrawSoon(): "wanted" until dtach's client is attached (the first chunk), then "armed" for
+  // REDRAW_WAIT_MS; a real change of size meanwhile ends it.
+  redraw: "none" | "wanted" | "armed";
+  // The count of resize() calls: the nudge never sets back a size that a client set.
+  resizes: number;
 };
+
+// redrawSoon(): how long a size from the client may take (it draws), then the pause between the
+// nudge's two size changes.
+const REDRAW_WAIT_MS = 300;
+const REDRAW_NUDGE_MS = 150;
 
 // Matches a leading run of cursor-home / erase-display sequences — exactly what
 // dtach emits on attach (ESC[H ESC[J).
@@ -662,6 +678,12 @@ export class TerminalManager {
     return env;
   }
 
+  // The env of an agent program that the console starts outside a terminal (a headless worker,
+  // headless/wiring.ts): the same rules as for a terminal agent.
+  agentEnvOf(id: string, extra?: Record<string, string>): Record<string, string> {
+    return this.childEnv(id, extra);
+  }
+
   // Wire a freshly-spawned pty into the manager: buffer output (in memory and,
   // for persisted sessions, on disk), fan out to subscribers, and clean up on
   // exit. Shared by spawn() and reattach().
@@ -670,7 +692,7 @@ export class TerminalManager {
   //     not a reattach to existing history).
   private register(
     id: string, proc: pty.IPty, session: string | null,
-    opts: { stripClear?: boolean; freshTranscript?: boolean; fresh?: boolean } = {},
+    opts: { stripClear?: boolean; freshTranscript?: boolean; fresh?: boolean; drawn?: boolean } = {},
   ): void {
     let transcript: Transcript | null = null;
     if (session) {
@@ -680,7 +702,7 @@ export class TerminalManager {
     }
     const term: Term = {
       proc, pasteReady: !opts.fresh, pasteTail: "", startedAt: Date.now(), buffer: new Scrollback(this.opts.scrollbackBytes), subs: new Set(), ends: new Set(), epoch: randomUUID(),
-      session, transcript, stripClear: opts.stripClear ?? false,
+      session, transcript, stripClear: opts.stripClear ?? false, drawn: opts.drawn ?? true, redraw: "none", resizes: 0,
     };
     this.terms.set(id, term);
     this.observe((o) => o.open(id, { cols: PTY_COLS, rows: PTY_ROWS }));
@@ -689,6 +711,7 @@ export class TerminalManager {
       if (term.stripClear) {
         data = data.replace(LEADING_CLEAR, "");
         term.stripClear = false; // only the very first attach chunk is dtach's clear
+        if (term.redraw === "wanted") this.armRedraw(id, term); // dtach's client is attached
       }
       if (data.length === 0) return;
       this.outputAt.set(id, this.now());
@@ -746,8 +769,9 @@ export class TerminalManager {
       if (route.via === "helper") {
         // As the agent uid: sudo passes only the env_keep keys on, the
         // helper starts the same dtach command in `cwd`.
+        const launch = o.helperLaunch ?? { command: inner, args: o.args };
         ({ command, args } = helperSpawnCommand(
-          route.x, { systemdRun: scopeRunner() }, session, resolve(o.cwd), inner, o.args,
+          route.x, { systemdRun: scopeRunner() }, session, resolve(o.cwd), launch.command, launch.args,
         ));
         env = helperEnv({ ...env, ...this.opts.agentEnv });
       } else {
@@ -836,11 +860,47 @@ export class TerminalManager {
     return run;
   }
 
+  // A client (the Terminal tab) attached to this agent. After a reattach the agent has drawn
+  // nothing for this console: dtach's attach redraw (-r winch) is a SIGWINCH at the same size, and
+  // Claude draws again only when the size really changes (claude 2.1.332 through dtach 0.9,
+  // measured). So the Terminal tab and the screen read had only the old transcript, or nothing.
+  // When no real change of size comes from the client within REDRAW_WAIT_MS after dtach's client
+  // is attached, the agent gets one row less, then its size back: it draws its whole screen. One
+  // time only. A reattach with no client (the boot recovery, a service) never gets it.
+  redrawSoon(id: string): void {
+    const t = this.terms.get(id);
+    if (!t || t.drawn || t.redraw !== "none") return;
+    t.redraw = "wanted";
+    if (!t.stripClear) this.armRedraw(id, t); // dtach's client is attached already
+  }
+
+  private armRedraw(id: string, t: Term): void {
+    t.redraw = "armed";
+    setTimeout(() => {
+      if (this.terms.get(id) !== t || t.redraw !== "armed") return;
+      t.redraw = "none";
+      if (!t.drawn) this.nudge(id, t);
+    }, REDRAW_WAIT_MS).unref();
+  }
+
+  private nudge(id: string, t: Term): void {
+    const { cols, rows } = t.proc;
+    if (!(rows > 1)) return;
+    t.drawn = true;
+    const seq = t.resizes;
+    try { t.proc.resize(cols, rows - 1); } catch { return; /* a dying pty */ }
+    setTimeout(() => {
+      if (this.terms.get(id) !== t || t.resizes !== seq) return; // a client set a size meanwhile
+      try { t.proc.resize(cols, rows); } catch { /* a dying pty */ }
+    }, REDRAW_NUDGE_MS).unref();
+  }
+
   // Wire a reattached client PTY in and seed its history.
   private adoptReattached(id: string, proc: pty.IPty, sock: string): Attachment | null {
     // Keep the existing transcript (it holds history from the previous server)
-    // and strip dtach's attach-time clear so it can't blank the replay.
-    this.register(id, proc, sock, { stripClear: true });
+    // and strip dtach's attach-time clear so it can't blank the replay. The agent has drawn
+    // nothing for this console yet (redrawSoon()).
+    this.register(id, proc, sock, { stripClear: true, drawn: false });
     this.outputAt.set(id, this.now()); // reattach counts as output
     // Seed the fresh in-memory buffer with the durable transcript so attach()'s
     // snapshot replays history — the whole point of surviving a restart. Idle
@@ -887,7 +947,11 @@ export class TerminalManager {
   resize(id: string, cols: number, rows: number): void {
     const t = this.terms.get(id);
     if (!t) return;
+    // A real change of size makes the agent draw its screen; the same size draws nothing.
+    const change = cols !== t.proc.cols || rows !== t.proc.rows;
+    t.resizes++;
     try { t.proc.resize(cols, rows); } catch { return; /* resize race on a dying pty */ }
+    if (change) { t.drawn = true; t.redraw = "none"; }
     this.observe((o) => o.resize(id, cols, rows));
   }
 

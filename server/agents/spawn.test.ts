@@ -10,6 +10,8 @@ import { EventHub, type ConsoleEvent } from "../events.js";
 import { agentPrompt, widgetsPrompt } from "./argv.js";
 import { resolveWidgetsDataDir } from "../widgets/paths.js";
 import { codexRuntime } from "./runtimes/codex.js";
+import { claudeRuntime } from "./runtimes/claude.js";
+import { onboardedLaunch } from "./runtimes/claude-trust.js";
 import { NO_MERGE_RULE, BRAIN_PROMPT_HEAD } from "../chief/brain/prompt.js";
 import { queueAgentPrompt } from "../chief/queue/prompt.js";
 import { remindAgentPrompt } from "../chief/remind/prompt.js";
@@ -29,7 +31,7 @@ async function setup() {
   const hub = new EventHub();
   const events: ConsoleEvent[] = [];
   hub.subscribe((e) => events.push(e));
-  type Spawned = { id: string; cwd: string; args: string[]; env?: Record<string, string> };
+  type Spawned = { id: string; cwd: string; args: string[]; env?: Record<string, string>; command?: string; helperLaunch?: { command: string; args: string[] } };
   const spawned: Spawned[] = [];
   const terminals = { spawn: (o: Spawned) => { spawned.push(o); }, kill: () => {} };
   const deps: SpawnDeps = {
@@ -46,6 +48,19 @@ async function setup() {
 }
 
 describe("spawnAgent", () => {
+  it("a claude spawn carries the onboarding launcher for the helper route; a codex spawn none", async () => {
+    const t = await setup();
+    try {
+      const r = await spawnAgent(t.deps, { prompt: "the task", runtime: "claude" });
+      if (!r.ok) throw new Error("spawn failed");
+      const s = t.spawned[0];
+      expect(s.command).toBe(claudeRuntime.bin());
+      expect(s.helperLaunch).toEqual(onboardedLaunch(claudeRuntime.bin(), s.args));
+      expect(s.args).toContain("the task");
+      expect(codexRuntime.helperLaunch).toBeUndefined();
+    } finally { await t.cleanup(); }
+  });
+
   it("records spawnedBy only when the request carries it", async () => {
     const t = await setup();
     try {
@@ -114,6 +129,10 @@ describe("spawnAgent", () => {
       expect(home).toBeTruthy();
       const md = await readFile(`${home}/AGENTS.md`, "utf8");
       expect(md).toContain(agentPrompt({ id: r.id, repo: t.repo }, resolveWidgetsDataDir()));
+      // Its hooks can fail: a kept first message would go again at each start (store.ts).
+      const rec = (await t.store.load(r.id))!;
+      expect(rec.firstPrompt).toBeUndefined();
+      expect(rec.firstPromptAt).toBeUndefined();
     } finally {
       if (prev === undefined) delete process.env.CODEX_EXECUTABLE;
       else process.env.CODEX_EXECUTABLE = prev;

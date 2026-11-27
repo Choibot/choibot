@@ -60,7 +60,7 @@ const EXIT_FILE_WAIT_MS = 1000;
 // fallocate --punch-hole is fast; one that hangs (a stuck filesystem) is killed after this long.
 const TRIM_TIMEOUT_MS = 2000;
 // Names that a shell runs or reads as code: the program's environment never holds them.
-const SHELL_CODE_ENV = /^(BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|BASH_FUNC_.*)$/;
+export const SHELL_CODE_ENV = /^(BASH_ENV|ENV|SHELLOPTS|BASHOPTS|PS4|BASH_FUNC_.*)$/;
 
 export type HeadlessOpts = {
   runDir: string;
@@ -157,6 +157,13 @@ export class HeadlessHost implements AgentHost {
   // The worker was started here once (its folder is there), live or not.
   owns(id: string): boolean { return SAFE_ID.test(id) && existsSync(join(this.runDir, id)); }
 
+  // Each worker that was started here once (its folder is there), live or not.
+  owned(): string[] {
+    try {
+      return readdirSync(this.runDir, { withFileTypes: true }).filter((d) => d.isDirectory() && SAFE_ID.test(d.name)).map((d) => d.name);
+    } catch { return []; }
+  }
+
   has(id: string): boolean {
     const l = this.live.get(id);
     return !!l && !l.ending && alive(l.pid, l.start);
@@ -179,13 +186,16 @@ export class HeadlessHost implements AgentHost {
   // stopped in a start) are closed and go to onNotResent.
   async reattach(id: string): Promise<boolean> {
     if (!SAFE_ID.test(id)) return false;
-    const ended: { code?: number | null } = {};
+    const ended: { code?: number | null; killed?: boolean } = {};
     let notResent: Array<{ uuid: string; text: string }> = [];
     let ok = false;
     try {
       ok = await this.serial(id, async () => {
         this.checkOpen();
         if (this.has(id)) return true;
+        // A program that kill() stopped and whose end the poll has not taken yet: its end says
+        // killed (a move to another login: kill, then a reattach in the resume).
+        const killed = this.live.get(id)?.killed ?? false;
         if (!this.owns(id)) return false;
         const p = this.savedPid(id);
         if (!p || !this.claim(id)) return false;
@@ -207,6 +217,7 @@ export class HeadlessHost implements AgentHost {
         }
         await this.drainOut(id);
         this.checkOpen();
+        ended.killed = killed;
         ended.code = this.closeDead(id);
         await this.stopUnit(id); // the end is taken (its pid file is gone): it is reported also after a shutdown
         return false;
@@ -218,7 +229,7 @@ export class HeadlessHost implements AgentHost {
       return false;
     }
     if (notResent.length) try { this.opts.onNotResent?.(id, notResent); } catch (err) { warn(id, "onNotResent", err); }
-    if ("code" in ended) this.reportExit(id, ended.code ?? null, false);
+    if ("code" in ended) this.reportExit(id, ended.code ?? null, ended.killed ?? false);
     return ok;
   }
 

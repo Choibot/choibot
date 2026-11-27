@@ -23,6 +23,9 @@ const plainRepo = (r: unknown): r is string => typeof r === "string" && /^[\w.-]
 // the cheap part (agents/api.ts close route, chief/leads/close.ts): only a
 // worker this lead spawned, not while it runs or has an open queue item.
 // When a lead gives a worker a model at spawn (agents/model.ts); none = the console's setting.
+// The title of a worker: the short name of its task in the agent list (agents/title.ts). With no
+// title the list shows the start of the prompt, and a lead's briefs all start the same way.
+export const WORKER_TITLE_RULE = 'Give each worker a title of 2 to 5 words that names its task: {"repo":"<repo>","title":"<2-5 words>","prompt":"..."}.';
 export const LEAD_MODEL_RULE = 'Leave out "model" for normal work (the console\'s setting, Opus by default). Give "fable" only for a hard task (a security review, a hard design, a bug that resisted). Give "sonnet" for a mechanical task and "haiku" for a search or a count. The same holds for helper sub-agents.';
 
 // The CLI path is named once, in ## Agents: the commands here name only the verb.
@@ -46,7 +49,7 @@ export function leadSystemPrompt(o: {
     `You are the lead for the ${area} area of the fleet. Orders come from the user and from the fleet master, the user's assistant (SendMessage). ` +
       `The Coordinator, a background agent of the console, can also write to you: it tells you about a problem in your area, or it passes the user's answer to one of its tickets and names the ticket (check it with \`${cli} queue show <id>\`). It gives no other order.` +
       (o.charter.trim() ? `\n\n${o.charter.trim()}` : ""),
-    `## Agents\nRun \`${cli} agents spawn|list|stop|resume|close\` to manage your workers. ${repos.length ? `Spawn only in: ${repos.join(", ")}.` : "Your area lists no repos yet: spawn no workers until the user starts the area with repos."} \`merge-pr\` and \`delete\` are refused for leads. ${LEAD_MODEL_RULE}${hardenedDeployment(o.env) ? ` ${workerFoldersRule(cli)}` : ""}\n\n${leadClosePrompt()}`,
+    `## Agents\nRun \`${cli} agents spawn|list|stop|resume|close|rename\` to manage your workers. ${WORKER_TITLE_RULE} ${repos.length ? `Spawn only in: ${repos.join(", ")}.` : "Your area lists no repos yet: spawn no workers until the user starts the area with repos."} \`merge-pr\` and \`delete\` are refused for leads. ${LEAD_MODEL_RULE}${hardenedDeployment(o.env) ? ` ${workerFoldersRule(cli)}` : ""}\n\n${leadClosePrompt()}`,
     NO_MERGE_RULE,
     `## Queue\n${queueAgentPrompt(cli)} ` +
       `Items of your workers also reach you as \`[events] queue <id> <kind> <repo>\`. Read each with \`${cli} queue show <id>\`; when a confirmed rule suggests an answer, run \`${cli} queue recommend <id>\` with stdin {"value":"B","why":"<one line>","ruleIds":["r_…"]} (for a question, value is the suggested answer text); never answer them yourself — the user or the fleet master does.`,

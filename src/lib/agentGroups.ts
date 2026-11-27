@@ -9,12 +9,12 @@ import { limitWord } from "./accounts";
 type Rec = { id: string; spawnedBy?: string; closedAt?: number };
 type Store = { getItem(k: string): string | null; setItem(k: string, v: string): void };
 // waits: it waits for the second sign-in (server/chief/chiefwait.ts).
-export type Lead = { id: string; area: string; status: string; waits?: boolean; waitsLogin?: boolean };
+export type Lead = { id: string; area: string; status: string; waits?: boolean; waitsLogin?: boolean; model?: string; account?: string };
 export type AgentGroups<T extends Rec, L extends { id: string } = Lead> = { leads: { lead: L; workers: T[] }[]; other: T[]; closed: T[] };
 
 // The started leads that have a record (the Master pane's rule for an openable lead), in order.
 export function leadsOf(rows: LeadRow[]): Lead[] {
-  return rows.flatMap((r) => (r.leadId && r.status != null ? [{ id: r.leadId, area: r.area, status: r.status, ...(r.waits ? { waits: true } : {}) }] : []));
+  return rows.flatMap((r) => (r.leadId && r.status != null ? [{ id: r.leadId, area: r.area, status: r.status, ...(r.waits ? { waits: true } : {}), ...(r.model ? { model: r.model } : {}), ...(r.account ? { account: r.account } : {}) }] : []));
 }
 
 // Keeps the list order (the server's saved rail order) inside every section. A record whose id is

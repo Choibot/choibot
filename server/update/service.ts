@@ -186,15 +186,19 @@ export class UpdateService {
     };
   }
 
-  async statusNow(): Promise<DeployStatus & { update: ReturnType<UpdateService["view"]> }> {
+  async statusNow(): Promise<DeployStatus & { update: ReturnType<UpdateService["view"]>; press: UpdateRun | null }> {
     await this.check();
-    const ticket = (await this.tickets()).find(isLive);
+    const all = await this.tickets();
+    const ticket = all.find(isLive);
     const run = ticket?.deploy?.update;
+    // The last press, also when its ticket closed (the page follows it through the restart; the
+    // Queue shows the same run on the ticket).
+    const press = all.reduce<UpdateRun | null>((a, i) => { const u = i.deploy?.update; return u && (!a || u.askedAt > a.askedAt) ? u : a; }, null);
     return {
       armed: true, unit: "", branch: "release", remote: "", live: this.d.running.commit ?? null,
       target: ticket?.deploy?.release?.commit ?? null, count: 0, ticketId: ticket?.id ?? null,
       run: run ? { id: `u${run.askedAt}`, phase: ENDED.has(run.state) ? "done" : "running", step: "restart" } : null,
-      update: this.view(),
+      update: this.view(), press,
     };
   }
 

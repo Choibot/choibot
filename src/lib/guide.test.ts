@@ -4,7 +4,7 @@ import { describe, expect, it } from "vitest";
 import { FAKE } from "../../server/guide/testkit";
 import type { GuideItem } from "../../server/guide/types";
 import {
-  BUSY_MAX_MS, cardModes, clockTime, fetchGuide, GUIDE_HINT_KEY, guideClosed, nextParts, offLine, readGuideHint, sendToGuide, sideOf, writeGuideHint,
+  BUSY_MAX_MS, clockTime, fetchGuide, GUIDE_HINT_KEY, guideClosed, nextParts, offLine, readGuideHint, sendToGuide, sideOf, writeGuideHint,
 } from "./guide";
 import { setupRows, type SetupAnswer } from "./setup";
 
@@ -100,17 +100,6 @@ describe("the thread", () => {
   const answer = (states: Record<string, string>): SetupAnswer => ({
     checkedAt: 1, home: true,
     steps: Object.entries(states).map(([id, state]) => ({ id, state, title: id, why: "", optional: false, text: `${id} ${state}` })) as never,
-  });
-
-  it("one card per step is live: the last one, and only while the step is open", () => {
-    const items = [
-      item({ kind: "card", step: "github" }, 1), item({ kind: "user", text: "x" }, 2), item({ kind: "card", step: "github" }, 3),
-      item({ kind: "card", step: "pair" }, 4), item({ kind: "card", step: "repo" }, 5), item({ kind: "card", step: "telegram" }, 6),
-      item({ kind: "card", step: "agent" }, 7),
-    ];
-    const rows = setupRows(answer({ pair: "done", github: "todo", repo: "blocked", telegram: "todo" }));
-    expect(Object.fromEntries(cardModes(items, rows))).toEqual({ i1: "old", i3: "live", i4: "done", i5: "waits", i6: "live", i7: "checking" });
-    expect(Object.fromEntries(cardModes(items, setupRows(null)))).toMatchObject({ i1: "old", i3: "checking" });
   });
 
   it("names who speaks, and finds the head of a \"Next\" line", () => {

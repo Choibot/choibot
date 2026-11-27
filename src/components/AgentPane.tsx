@@ -26,7 +26,8 @@ import { CheckIcon, FileIcon, MoreIcon } from "./SideIcons";
 import { threadKnown, useThread } from "../lib/useThread";
 import { usePrompt } from "../lib/usePrompt";
 import { chiefFetch } from "../lib/chief";
-import { agentChangedFiles, changedFilesMemory } from "../lib/agents";
+import { agentChangedFiles, agentModel, changedFilesMemory, fetchAgent, modelTag, renameAgent } from "../lib/agents";
+import { TITLE_MAX } from "../../server/agents/title";
 import { sendKeys } from "../lib/prompt";
 import { hasFiles } from "../lib/upload";
 import { answerImages, hasImage, ticketAt } from "../lib/answerImages";
@@ -96,10 +97,15 @@ function useChangedCount(agentId: string, on: boolean): number | null {
 // fleet master's lead switch); `metaExtra`: more text on the status line (the master's status line).
 // `avatar`: a lead's avatar, before the title of the header.
 // `idleText`: what an idle agent waits for when it is not the user (the Coordinator: the next event).
-export function AgentPane({ agentId, label, branch, status: statusHint, stateWord, canStop = false, queue, activity, filesOpen = false, onToggleFiles, onBack, headExtra, metaExtra, avatar, idleText }: {
+// `model`: the model the agent runs on (lib/agents agentModel), a quiet word on the status line.
+// Not given (undefined) for an agent that is not a worker: the pane reads its record once.
+// `account`: the Claude login it runs under, after the model ("opus · @choibot"); absent = the default.
+// `onRenamed`: a worker's new title (its Rename here, or a rename from elsewhere), for the page.
+export function AgentPane({ agentId, label, branch, status: statusHint, stateWord, canStop = false, queue, activity, filesOpen = false, onToggleFiles, onBack, headExtra, metaExtra, avatar, idleText, model, account, onRenamed }: {
   // `stateWord`: a limit is in the way of the agent ("stopped at a limit", "waits for a login").
   agentId: string; label?: string; branch?: string | null; status?: string; stateWord?: string | null; canStop?: boolean; queue?: UseQueue; activity?: { shown: boolean; toggle: () => void }; idleText?: string;
   filesOpen?: boolean; onToggleFiles?: () => void; onBack?: () => void; headExtra?: ReactNode; metaExtra?: string; avatar?: ReactNode;
+  model?: string | null; account?: string | null; onRenamed?: (title: string) => void;
 }) {
   // A worker (canStop): not a lead and not the master. Only a worker has a
   // Changes rail and widgets.
@@ -112,7 +118,22 @@ export function AgentPane({ agentId, label, branch, status: statusHint, stateWor
   // raw terminal sees the dialog there and has the keyboard.
   const threadPref = pref === "thread";
   const prompt = usePrompt(agentId, threadPref);
-  const thread = useThread(agentId, threadPref, { onEvent: prompt.onEvent, onOpen: prompt.refresh });
+  // Rename (a worker): the title is edited in place; Enter saves, Escape leaves. `named`: the title
+  // saved here or by a rename from elsewhere (the event), until the page's record has it.
+  const [named, setNamed] = useState<string | null>(null);
+  const [naming, setNaming] = useState(false);
+  const [nameErr, setNameErr] = useState<string | null>(null);
+  const nameTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(nameTimer.current), []);
+  const onRenamedRef = useRef(onRenamed);
+  onRenamedRef.current = onRenamed;
+  const thread = useThread(agentId, threadPref, {
+    onEvent: (e) => {
+      prompt.onEvent(e);
+      if (e.type === "agent-renamed" && e.agentId === agentId) { setNamed(e.label); onRenamedRef.current?.(e.label); }
+    },
+    onOpen: prompt.refresh,
+  });
   const mode = shownMode(pref, thread.available);
   // What the user sent and the agent's file does not show as its own entry yet.
   const outbox = useOutbox(agentId, thread.state, thread.status, thread.skew, thread.kick);
@@ -178,8 +199,42 @@ export function AgentPane({ agentId, label, branch, status: statusHint, stateWor
       .then((r) => show("stop", r.ok), () => show("stop", false));
   }, [agentId, show]);
 
+  const title = named ?? label;
+  const rename = useCallback((raw: string) => {
+    setNaming(false);
+    const next = raw.trim();
+    if (!next || next === title) return;
+    const before = named;
+    setNamed(next);
+    setNameErr(null);
+    void renameAgent(agentId, next).then((why) => {
+      if (!why) { onRenamedRef.current?.(next); return; }
+      setNamed(before);
+      setNameErr(why);
+      clearTimeout(nameTimer.current);
+      nameTimer.current = setTimeout(() => setNameErr(null), FLASH_MS * 3);
+    });
+  }, [agentId, named, title]);
+  const nameInput = naming && (
+    <TitleInput value={title ?? ""} onSave={rename} onLeave={() => setNaming(false)} />
+  );
+
+  // The model and the login: the page's words for a worker or a lead; else (the fleet master, the
+  // Coordinator) the agent's own record, read once. Unknown: no word.
+  const [own, setOwn] = useState<{ model?: string; account?: string }>({});
+  useEffect(() => {
+    if (model !== undefined || worker) return;
+    let live = true;
+    void fetchAgent(agentId).then((a) => { if (live) setOwn({ model: agentModel(a), account: a.account }); }, () => {});
+    return () => { live = false; };
+  }, [agentId, model, worker]);
+  const tag = modelTag(model ?? own.model, account ?? own.account);
+  const modelPart = tag && <><span className={s.sep} aria-hidden>·</span><span className={s.model} data-model-tag="" title={tag.title}>{tag.text}</span></>;
+
   // The phone menu closes on a press: the result shows on the header's status line.
-  const flashText = !onBack || !flash ? null
+  const flashText = !onBack ? null
+    : nameErr ? "Not renamed"
+    : !flash ? null
     : flash.what === "interrupt" ? (flash.ok ? "Interrupt sent" : "Interrupt not sent")
     : flash.ok ? null : "Not stopped";
 
@@ -256,10 +311,11 @@ export function AgentPane({ agentId, label, branch, status: statusHint, stateWor
       )}
       {onBack ? (
         <PhoneHeader
-          onBack={onBack} icon={avatar} title={label ?? "Agent"}
+          onBack={onBack} icon={avatar} title={nameInput || (title ?? "Agent")}
           sub={<>
-            <span className={s.dot} data-tone={flashText && !flash?.ok ? "err" : st.tone} aria-hidden />
-            <span className={s.state} data-tone={st.tone} title={chipTitle} role={st.tone === "warn" || flashText ? "status" : undefined}>{flashText ?? (st.text || "\u00A0")}</span>
+            <span className={s.dot} data-tone={flashText && (nameErr || !flash?.ok) ? "err" : st.tone} aria-hidden />
+            <span className={s.state} data-tone={st.tone} title={nameErr ?? chipTitle} role={st.tone === "warn" || flashText ? "status" : undefined}>{flashText ?? (st.text || "\u00A0")}</span>
+            {modelPart}
             {branch && <><span className={s.sep} aria-hidden>·</span><span className={s.branch} title={branch}>{branch}</span></>}
             {metaExtra && <><span className={s.sep} aria-hidden>·</span><span className={s.extra}>{metaExtra}</span></>}
           </>}
@@ -269,6 +325,7 @@ export function AgentPane({ agentId, label, branch, status: statusHint, stateWor
               { key: "terminal", label: "Terminal", checked: mode === "terminal", onSelect: () => choose("terminal") },
               ...(activity ? [{ key: "activity", label: "Show activity", sep: true, checked: activity.shown, disabled: mode === "terminal", onSelect: activity.toggle }] : []),
               ...(phoneLogin ? [{ key: "login", label: `Claude login: ${loginButtonText(phoneLogin, 14)}`, sep: true, onSelect: () => { void phoneLogin.load(); setLoginOpen(true); } }] : []),
+              ...(worker ? [{ key: "rename", label: "Rename", sep: true, onSelect: () => setNaming(true) }] : []),
               ...(showInterrupt ? [{ key: "interrupt", label: "Interrupt", sep: true, disabled: acting !== null || card !== null, onSelect: interrupt }] : []),
               ...(showStop ? [{ key: "stop", label: "Stop", sep: !showInterrupt, disabled: acting !== null, onSelect: stop }] : []),
             ]} edge={!(worker && onToggleFiles)} />
@@ -292,10 +349,15 @@ export function AgentPane({ agentId, label, branch, status: statusHint, stateWor
             {avatar && <span className={s.avatar}>{avatar}</span>}
             <div className={s.ttl}>
               {/* Always there: the line keeps its height while the agent's record is read. */}
-              <b className={s.label} title={label}>{label ?? "\u00A0"}</b>
+              {/* A worker's title is its Rename: a click edits it in place. */}
+              {nameInput ? <b className={s.label}>{nameInput}</b>
+                : worker ? <button type="button" className={`${s.label} ${s.labelBtn}`} title={title ? `${title} · Rename` : "Rename"} onClick={() => setNaming(true)}>{title ?? "\u00A0"}</button>
+                : <b className={s.label} title={title}>{title ?? "\u00A0"}</b>}
               <small className={s.meta}>
-                <span className={s.dot} data-tone={st.tone} aria-hidden />
-                {st.text && <span className={s.state} data-tone={st.tone} title={chipTitle} role={st.tone === "warn" ? "status" : undefined}>{st.text}</span>}
+                <span className={s.dot} data-tone={nameErr ? "err" : st.tone} aria-hidden />
+                {nameErr ? <span className={s.state} data-tone="err" title={nameErr} role="status">Not renamed</span>
+                  : st.text && <span className={s.state} data-tone={st.tone} title={chipTitle} role={st.tone === "warn" ? "status" : undefined}>{st.text}</span>}
+                {modelPart}
                 {branch && <><span className={s.sep} aria-hidden>·</span><span className={s.branch} title={branch}>{branch}</span></>}
                 {metaExtra && <><span className={s.sep} aria-hidden>·</span><span className={s.extra} title={metaExtra}>{metaExtra}</span></>}
               </small>
@@ -375,6 +437,27 @@ function FilesIcon() {
     <svg className={s.icon} viewBox="0 0 16 16" aria-hidden>
       <rect x="2" y="3" width="12" height="10" rx="2" /><path d="M10 3v10" />
     </svg>
+  );
+}
+
+// The title edited in place: the same font and line as the title. Enter saves, Escape leaves (and
+// so does a press elsewhere: only Enter saves).
+function TitleInput({ value, onSave, onLeave }: { value: string; onSave: (v: string) => void; onLeave: () => void }) {
+  const [v, setV] = useState(value);
+  const ref = useRef<HTMLInputElement>(null);
+  const done = useRef(false);
+  useEffect(() => { ref.current?.focus(); ref.current?.select(); }, []);
+  const end = (f: () => void) => { if (done.current) return; done.current = true; f(); };
+  return (
+    <input
+      ref={ref} className={s.nameInput} value={v} maxLength={TITLE_MAX} aria-label="Agent title" enterKeyHint="done"
+      onChange={(e) => setV(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === "Enter") { e.preventDefault(); end(() => onSave(v)); }
+        else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); end(onLeave); }
+      }}
+      onBlur={() => end(onLeave)}
+    />
   );
 }
 

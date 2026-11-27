@@ -26,3 +26,30 @@ describe("mergeAgent refusal sentences", () => {
     expect(await run(res(409, {}))).toEqual({ ok: false, message: "agent still live — stop it first" });
   });
 });
+
+describe("the model tag of a row and a header", () => {
+  it("uses the model of the last start, else the record's model, else none", async () => {
+    const { agentModel } = await import("./agents");
+    expect(agentModel({ runModel: "opus", model: "sonnet" })).toBe("opus");
+    expect(agentModel({ model: "sonnet" })).toBe("sonnet");
+    expect(agentModel({})).toBeUndefined();
+  });
+  it("the row's tag is the model word only; the login is not the default one", async () => {
+    const { modelWord, loginOf } = await import("./agents");
+    expect(modelWord("opus")).toBe("opus");
+    expect(modelWord("claude-opus-5-5")).toBe("opus-5-5");
+    expect(modelWord(undefined)).toBeUndefined();
+    expect(loginOf("choibot")).toBe("choibot");
+    expect(loginOf("default")).toBeUndefined();
+    expect(loginOf("")).toBeUndefined();
+    expect(loginOf(undefined)).toBeUndefined();
+  });
+  it("shows the model and the login; no tag when the console cannot know either", async () => {
+    const { modelTag } = await import("./agents");
+    expect(modelTag("opus", "choibot")).toEqual({ text: "opus · @choibot", title: "Model: opus · Claude account: choibot" });
+    expect(modelTag("claude-sonnet-5-5", "default")).toEqual({ text: "sonnet-5-5", title: "Model: claude-sonnet-5-5" });
+    expect(modelTag(undefined, "choibot")).toEqual({ text: "@choibot", title: "Claude account: choibot" });
+    expect(modelTag(undefined, "default")).toBeNull();
+    expect(modelTag(undefined)).toBeNull();
+  });
+});

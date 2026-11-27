@@ -7,6 +7,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
 import { USER_ALONE_ERR } from "../../server/chief/gate.js";
+import { CLI_NAME } from "../../server/brand.js";
 import { runAgents, type AgentsDeps } from "./agents.js";
 
 type Call = { method: string; path: string; body: any; headers: Record<string, string> };
@@ -140,6 +141,31 @@ describe("choibot agents spawn", () => {
     expect(await runAgents("spawn", [], w.deps)).toBe(0);
     expect(w.calls[1].body).toEqual({ repo: "/ws/app-shop", prompt: "fix the login", baseBranch: "develop" });
     expect(JSON.parse(w.out.join(""))).toEqual({ id: "new-1" });
+  });
+
+  it("posts the title, trimmed, with the spawn", async () => {
+    const w = world({
+      "GET /api/repos": () => ({ body: { repos: [{ name: "app-shop", path: "/ws/app-shop", branch: "main" }] } }),
+      "POST /api/agents": () => ({ status: 202, body: { id: "new-1" } }),
+    }, JSON.stringify({ repo: "app-shop", title: "  Login page fix ", prompt: "fix the login" }));
+    expect(await runAgents("spawn", [], w.deps)).toBe(0);
+    expect(w.calls[1].body).toEqual({ repo: "/ws/app-shop", prompt: "fix the login", title: "Login page fix" });
+  });
+
+  it("refuses a title that is too long or not one line, with one clear line and no request", async () => {
+    const cases: [unknown, string][] = [
+      ["x".repeat(41), "spawn: title is 41 characters; the most is 40"],
+      ["two\nlines", "spawn: title must be one line"],
+      ["   ", "spawn: title must not be empty"],
+      [7, "spawn: title must be text"],
+    ];
+    for (const [title, line] of cases) {
+      const w = world({ "GET /api/repos": () => ({ body: { repos: [{ name: "app-shop", path: "/ws/app-shop", branch: "main" }] } }) },
+        JSON.stringify({ repo: "app-shop", title, prompt: "x" }));
+      expect(await runAgents("spawn", [], w.deps)).toBe(1);
+      expect(w.err.join("\n")).toBe(line);
+      expect(w.calls.some((c) => c.method === "POST")).toBe(false);
+    }
   });
 
   it("rejects bad JSON, a missing prompt and an unknown repo with exit 1 (Review Focus 5)", async () => {
@@ -291,6 +317,37 @@ describe("choibot agents merge-pr", () => {
     w.deps.fetch = (async () => { throw new TypeError("fetch failed"); }) as typeof fetch;
     expect(await runAgents("list", [], w.deps)).toBe(1);
     expect(w.err.join("")).toContain("console unreachable");
+  });
+});
+
+describe("choibot agents rename", () => {
+  it("posts the title (the words after the id, joined) and prints the answer", async () => {
+    const w = world({ "POST /api/agents/1a2b3c4d-aaaa/rename": (b) => ({ status: 202, body: { id: "1a2b3c4d-aaaa", label: b.title } }) });
+    expect(await runAgents("rename", ["1a2b3c4d-aaaa", "Worker", "titles"], w.deps)).toBe(0);
+    expect(w.calls).toEqual([expect.objectContaining({ method: "POST", path: "/api/agents/1a2b3c4d-aaaa/rename", body: { title: "Worker titles" } })]);
+    expect(JSON.parse(w.out.join(""))).toEqual({ id: "1a2b3c4d-aaaa", label: "Worker titles" });
+  });
+
+  it("a lead sends its agent headers; the server's refusal is printed, exit 1", async () => {
+    const error = "refused: w9 was not spawned by lead-app-shop; a lead renames only the workers it spawned";
+    const w = world({ "POST /api/agents/w9/rename": () => ({ status: 403, body: { error } }) });
+    w.deps.env = { PORT: "4321", CHIEF_ENABLED: "1", CHOIBOT_AGENT_ID: "lead-app-shop", CHOIBOT_AGENT_PASS: "p" };
+    expect(await runAgents("rename", ["w9", "New name"], w.deps)).toBe(1);
+    expect(w.calls[0].headers["x-choibot-agent"]).toBe("lead-app-shop");
+    expect(w.err.join("")).toBe(error);
+  });
+
+  it("refuses a missing title and a long one locally: no request leaves", async () => {
+    for (const [args, line] of [
+      [["1a2b3c4d-aaaa"], `usage: ${CLI_NAME} agents rename <id> "<title>"`],
+      [[], `usage: ${CLI_NAME} agents rename <id> "<title>"`],
+      [["1a2b3c4d-aaaa", "y".repeat(41)], "rename: title is 41 characters; the most is 40"],
+    ] as [string[], string][]) {
+      const w = world({});
+      expect(await runAgents("rename", args, w.deps)).toBe(1);
+      expect(w.calls).toEqual([]);
+      expect(w.err.join("")).toBe(line);
+    }
   });
 });
 

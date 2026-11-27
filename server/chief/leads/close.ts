@@ -8,7 +8,8 @@
 // Every other caller keeps what it had before this gate: a request without
 // agent headers (the user's ✕, a paired browser) and the two masters pass
 // untouched. Any other agent (a worker, an issue agent, headers that do not
-// authenticate) is refused.
+// authenticate) is refused. A rename (POST /api/agents/:id/rename) takes the same
+// owner rule (ownerRefusal), without the close's running and open-item checks.
 import { isMasterKind, type AgentRecord } from "../../agents/store.js";
 import type { Caller } from "../auth.js";
 import type { QueueItem } from "../queue/types.js";
@@ -33,6 +34,29 @@ const what = (rec: AgentRecord): string | null => {
   return null;
 };
 
+// A rename (POST /api/agents/:id/rename) takes the same owner rule as a close.
+export const LEAD_RENAME_RULE = "a lead renames only the workers it spawned";
+
+// The owner rule of a close and of a rename: the user (no agent headers) and the masters act on
+// every agent; a lead only on a worker it spawned; any other agent on none. `verb`/`rule` word
+// the refusal. Null: the caller may act on `target` (a lead: `target` is its own worker).
+export function ownerRefusal(
+  caller: Caller, id: string, target: AgentRecord | null, verb: string, rule: string,
+): CloseRefusal | null {
+  if (!caller.agentHeaders) return null;
+  if (caller.agentId && isMasterKind(caller.kind)) return null;
+  if (caller.level !== "lead" || !caller.agentId) {
+    return { code: 403, error: `refused: only the user or the lead that spawned an agent ${verb} it; ${rule}` };
+  }
+  if (!target) return { code: 404, error: "not found" };
+  const persistent = what(target);
+  if (persistent) return { code: 403, error: `refused: ${id} is ${persistent}; ${rule}` };
+  if (target.spawnedBy !== caller.agentId) {
+    return { code: 403, error: `refused: ${id} was not spawned by ${caller.agentId}; ${rule}` };
+  }
+  return null;
+}
+
 // Why this caller may not close `target` (the loaded record of `id`, or null),
 // or null when the close goes on as before the gate. `openItem` is asked last
 // and only for a lead's own, stopped or idle worker.
@@ -40,17 +64,9 @@ export async function closeRefusal(
   caller: Caller, id: string, target: AgentRecord | null,
   openItem: (agentId: string) => Promise<string | null>,
 ): Promise<CloseRefusal | null> {
-  if (!caller.agentHeaders) return null;
-  if (caller.agentId && isMasterKind(caller.kind)) return null;
-  if (caller.level !== "lead" || !caller.agentId) {
-    return { code: 403, error: `refused: only the user or the lead that spawned an agent closes it; ${LEAD_CLOSE_RULE}` };
-  }
-  if (!target) return { code: 404, error: "not found" };
-  const persistent = what(target);
-  if (persistent) return { code: 403, error: `refused: ${id} is ${persistent}; ${LEAD_CLOSE_RULE}` };
-  if (target.spawnedBy !== caller.agentId) {
-    return { code: 403, error: `refused: ${id} was not spawned by ${caller.agentId}; ${LEAD_CLOSE_RULE}` };
-  }
+  const owner = ownerRefusal(caller, id, target, "closes", LEAD_CLOSE_RULE);
+  // Refused, or the user or a master (they pass as before the gate): no more checks.
+  if (owner || !caller.agentHeaders || (caller.agentId && isMasterKind(caller.kind)) || !target) return owner;
   if (target.status === "running") {
     return { code: 409, error: `refused: ${id} is running; close it when its task is done` };
   }

@@ -1,7 +1,7 @@
 // src/components/AgentList.tsx
 "use client";
 import { Fragment, useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from "react";
-import { fetchAgents, resumeAgent, stopAgent, deleteAgent, closeAgent, reopenAgent, reorderAgents, CLOSED_TTL_MS, type AgentSession } from "../lib/agents";
+import { fetchAgents, resumeAgent, stopAgent, deleteAgent, closeAgent, reopenAgent, reorderAgents, CLOSED_TTL_MS, agentModel, loginOf, modelTag, modelWord, type AgentSession } from "../lib/agents";
 import { getChiefState, pairSentence } from "../lib/chief";
 import { limitTag, limitWord } from "../lib/accounts";
 import { agentsWord, browserStore, closedDot, groupAgents, leadCount, leadsOf, leadSummary, markClosed, moveWithinSection, readLeadOpen, sectionOf, agentDot, statusDot, ticketsWord, writeLeadOpen, type Lead } from "../lib/agentGroups";
@@ -58,6 +58,20 @@ function OpenCount({ n, title }: { n: number | undefined; title?: string }) {
 const NEW_WORD = "new output";
 function NewMark({ on }: { on: boolean }) {
   return on ? <span className={s.srOnly}>, {NEW_WORD}</span> : null;
+}
+
+// The name of a row and its model tag ("opus"): the tag always shows, the same on every row; the
+// name takes the rest of the line and is cut with "…" (the full name is in the row's hover text
+// and the pane's header). The tag's title says the model in full and the login.
+function NameTag({ name, isNew, model, account }: { name: string; isNew: boolean; model: string | undefined; account?: string }) {
+  const word = modelWord(model);
+  return (
+    <>
+      <span className={`${s.nm} ${isNew ? s.nmNew : ""}`}>{name}</span>
+      <NewMark on={isNew} />
+      {word && <span className={s.tag} data-model-tag="" title={modelTag(model, account)?.title}>{word}</span>}
+    </>
+  );
 }
 
 // Time to the agent's next open reminder, muted, left of the count column (the clock says it is
@@ -163,6 +177,8 @@ export function AgentList({ selected, onSelect, onDeleted, reloadSignal, master,
       if (!sessions.some((x) => x.id === ev.agentId)) refresh();
       else setSessions((s) => s.map((x) => (x.id === ev.agentId ? { ...x, closedAt: undefined } : x)));
     }
+    // Renamed (the pane's Rename, a lead's `agents rename`, another tab): the new title at once.
+    if (e.type === "agent-renamed") setSessions((s) => s.map((x) => (x.id === e.agentId ? { ...x, label: e.label } : x)));
     // Closed from elsewhere (its lead's `agents close`, another tab): the row moves to Closed.
     if (ev.type === "agent-closed" && ev.agentId) setSessions((s) => markClosed(s, ev.agentId!, Date.now()));
     if (ev.type === "agent-notify" && ev.agentId && ev.agentId !== selected) {
@@ -281,6 +297,7 @@ export function AgentList({ selected, onSelect, onDeleted, reloadSignal, master,
   // show on hover (always on touch). The branch is in the row's title. `nested` indents a lead's worker.
   const openRow = (a: AgentSession, nested = false) => {
     const where = a.head ?? a.branch;
+    const login = loginOf(a.account);
     const isNew = !!unread[a.id];
     return (
       <Fragment key={a.id}>
@@ -292,13 +309,12 @@ export function AgentList({ selected, onSelect, onDeleted, reloadSignal, master,
           onPointerDown={(e) => onGripDown(e, a.id)}
         ><GripIcon /></span>
         <button onClick={() => select(a.id)} className={s.pick} aria-current={a.id === selected || undefined}
-          {...intent(a.id)} title={`${where ? `${a.label} · ${where}${a.baseBranch ? ` → ${a.baseBranch}` : ""}` : a.label}${isNew ? ` · ${NEW_WORD}` : ""}`}>
+          {...intent(a.id)} title={`${where ? `${a.label} · ${where}${a.baseBranch ? ` → ${a.baseBranch}` : ""}` : a.label}${login ? ` · @${login}` : ""}${isNew ? ` · ${NEW_WORD}` : ""}`}>
           <StatusDot status={agentDot(a)} />
-          <span className={`${s.nm} ${isNew ? s.nmNew : ""}`}>{a.label}</span>
-          <NewMark on={isNew} />
-          {/* Only non-Claude agents and non-default logins are badged. */}
+          {/* The model only ("opus"); the login is in the hover text and the pane's header. */}
+          <NameTag name={a.label} isNew={isNew} model={agentModel(a)} account={a.account} />
+          {/* Only non-Claude agents are badged with their runtime. */}
           {a.runtime && a.runtime !== "claude" && <span className={s.tag} title={`runtime: ${runtimeLabel(a.runtime)}`}>{runtimeLabel(a.runtime)}</span>}
-          {a.account && a.account !== "default" && <span className={s.tag} title={`Claude account: ${a.account}`}>@{a.account}</span>}
           {limitTag(a) && <span className={s.tag} data-limit="" title={limitWord(a) ?? undefined}>{limitTag(a)}</span>}
         </button>
         {remindBadge(a.id)}
@@ -339,10 +355,9 @@ export function AgentList({ selected, onSelect, onDeleted, reloadSignal, master,
           className={s.fold} onClick={() => toggleLead(l)} aria-expanded={expanded}
           aria-label={fold} title={fold}
         ><ChevronIcon open={expanded} /></button>
-        <button onClick={pickLead} {...intent(l.id, false)} className={s.pick} aria-current={leads?.selected === l.id || undefined} title={`Lead · ${l.area}${isNew ? ` · ${NEW_WORD}` : ""}`}>
+        <button onClick={pickLead} {...intent(l.id, false)} className={s.pick} aria-current={leads?.selected === l.id || undefined} title={`Lead · ${l.area}${loginOf(l.account) ? ` · @${loginOf(l.account)}` : ""}${isNew ? ` · ${NEW_WORD}` : ""}`}>
           <LeadAvatar area={l.area} size={phone ? 36 : 24} status={statusDot(l.status)} />
-          <span className={`${s.nm} ${isNew ? s.nmNew : ""}`}>{l.area}</span>
-          <NewMark on={isNew} />
+          <NameTag name={l.area} isNew={isNew} model={l.model} account={l.account} />
         </button>
         {remindBadge(l.id)}
         {queue && <OpenCount n={count.n} title={count.title} />}

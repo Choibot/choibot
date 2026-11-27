@@ -135,7 +135,7 @@ describe("the calls", () => {
 describe("the first agent, in plain words", () => {
   const view = (o: Partial<FirstView> = {}): FirstView => ({ task: "t", repo: "shop", repos: ["shop"], agent: null, ticket: null, now: 1_000_000, ...o });
   const agent = (state: NonNullable<FirstView["agent"]>["state"], o: Partial<NonNullable<FirstView["agent"]>> = {}) =>
-    ({ id: "a1", name: "First task", state, startedAt: 1_000_000 - 130_000, pullRequest: false, ...o });
+    ({ id: "a1", name: "First task", state, startedAt: 1_000_000 - 130_000, pullRequest: false, noSession: false, ...o });
 
   it("offers the start, with the repo", () => {
     expect(firstSay(view())).toMatchObject({ acts: ["start"], line: "The agent works in its own copy of shop. Your main branch is not touched." });
@@ -143,25 +143,56 @@ describe("the first agent, in plain words", () => {
   });
 
   it("says that the agent works, and for how long", () => {
-    expect(firstSay(view({ agent: agent("working") }))).toMatchObject({ tone: "run", line: "Working · started 2 minutes ago", acts: ["thread"] });
+    expect(firstSay(view({ agent: agent("working") }))).toMatchObject({ tone: "run", line: "Working · started 2 minutes ago", acts: [] });
     const slow = firstSay(view({ agent: agent("working", { startedAt: 1_000_000 - SLOW_MS - 60_000 }) }));
     expect(slow.line).toBe("Working for 9 minutes. This takes longer than usual.");
-    expect(slow.acts).toEqual(["thread"]);
+    expect(slow).toMatchObject({ hint: "You can close this page: the agent keeps working.", acts: [] });
+  });
+
+  // The live fault (hosted console, release 861): the thread stayed empty and the row said
+  // "Working". Now: a short line and the way to the screen where Claude waits.
+  it("says that no session started when Claude did not take the task in, and offers its terminal", () => {
+    const stuck = { tone: "warn", line: "No session started yet.", hint: "Its terminal shows what Claude waits for.", acts: ["terminal"] };
+    expect(firstSay(view({ agent: agent("working", { noSession: true }) }))).toEqual(stuck);
+    // A move or a restart before the first turn leaves the record idle: the same words.
+    expect(firstSay(view({ agent: agent("waiting", { noSession: true }) }))).toEqual(stuck);
+    expect(firstSay(view({ agent: agent("working") })).line).toBe("Working · started 2 minutes ago");
+    // A pull request ticket, an error, an end: their own words.
+    expect(firstSay(view({ agent: agent("waiting", { noSession: true }), ticket: { id: "q1", state: "open" } })).acts).toEqual([]);
+    expect(firstSay(view({ agent: agent("error", { noSession: true }) })).line).toBe("The agent stopped with an error.");
   });
 
   it("says what happened and what to press when the agent stops with no pull request", () => {
-    expect(firstSay(view({ agent: agent("waiting") }))).toMatchObject({ tone: "warn", line: "The agent stopped and opened no pull request.", acts: ["thread", "again"] });
-    expect(firstSay(view({ agent: agent("waiting", { pullRequest: true }) }))).toMatchObject({ line: "The agent opened a pull request, but its ticket did not come.", acts: ["thread"] });
-    expect(firstSay(view({ agent: agent("error") }))).toMatchObject({ line: "The agent stopped with an error.", acts: ["thread", "again"] });
-    expect(firstSay(view({ agent: agent("ended") })).acts).toEqual(["again", "thread"]);
+    expect(firstSay(view({ agent: agent("waiting") }))).toMatchObject({ tone: "warn", line: "The agent stopped and opened no pull request.", acts: ["again"] });
+    expect(firstSay(view({ agent: agent("waiting", { pullRequest: true }) }))).toMatchObject({ line: "The agent opened a pull request, but its ticket did not come.", acts: ["again"] });
+    expect(firstSay(view({ agent: agent("ended") })).acts).toEqual(["again"]);
     expect(firstSay(view({ agent: agent("closed") })).acts).toEqual(["again"]);
     expect(firstSay(view({ agent: agent("gone") }))).toMatchObject({ line: "The agent is not there any more.", acts: ["again"] });
-    for (const s of ["waiting", "error", "ended", "closed", "gone"] as const) expect(firstSay(view({ agent: agent(s) })).hint).toMatch(/thread|again/);
+    for (const s of ["waiting", "ended", "closed", "gone"] as const) expect(firstSay(view({ agent: agent(s) })).hint).toMatch(/again/);
+  });
+
+  it("an error: its line, the error's own sentence when the console has one, and Try again only", () => {
+    const err = firstSay(view({ agent: agent("error", { error: "Usage limit reached" }) }));
+    expect(err).toEqual({ tone: "warn", line: "The agent stopped with an error.", hint: "Usage limit reached", acts: ["again"] });
+    expect(firstSay(view({ agent: agent("error") }))).toEqual({ tone: "warn", line: "The agent stopped with an error.", acts: ["again"] });
+  });
+
+  it("sends the user to no thread of the agent, in no state", () => {
+    const states = ["working", "waiting", "error", "ended", "closed", "gone"] as const;
+    const views = [
+      ...states.map((s) => view({ agent: agent(s) })),
+      // no session: its terminal is the way (the word "terminal" is allowed, a thread is not)
+      ...states.map((s) => view({ agent: agent(s, { noSession: true }) })),
+      view({ agent: agent("working", { startedAt: 1_000_000 - SLOW_MS - 60_000 }) }),
+      view({ agent: agent("waiting", { pullRequest: true }) }),
+      ...(["open", "closed", "merged"] as const).map((t) => view({ agent: agent("waiting"), ticket: { id: "q1", state: t } })),
+    ];
+    for (const v of views) expect(JSON.stringify(firstSay(v))).not.toMatch(/thread/i);
   });
 
   it("points to the next step when the pull request is open, and offers a new start when it was closed", () => {
-    expect(firstSay(view({ agent: agent("waiting"), ticket: { id: "q1", state: "open" } }))).toMatchObject({ tone: "ok", acts: ["thread"] });
-    expect(firstSay(view({ agent: agent("waiting"), ticket: { id: "q1", state: "closed" } })).acts).toEqual(["again", "thread"]);
+    expect(firstSay(view({ agent: agent("waiting"), ticket: { id: "q1", state: "open" } }))).toMatchObject({ tone: "ok", acts: [] });
+    expect(firstSay(view({ agent: agent("waiting"), ticket: { id: "q1", state: "closed" } })).acts).toEqual(["again"]);
     expect(firstSay(view({ agent: agent("gone"), ticket: { id: "q1", state: "merged" } })).acts).toEqual([]);
   });
 
@@ -171,8 +202,9 @@ describe("the first agent, in plain words", () => {
 
   it("says what stands in the way of a merge", () => {
     const pr = (o: object) => ({ pr: { url: "https://github.com/acme/shop/pull/1", number: 1, ...o } }) as never;
-    expect(mergeHint(pr({ mergeable: "CONFLICTING" }))).toMatch(/conflicts.*Update your branch/);
+    expect(mergeHint(pr({ mergeable: "CONFLICTING" }))).toMatch(/conflicts.*Open it on GitHub/);
     expect(mergeHint(pr({ checks: "failure" }))).toMatch(/check of the pull request fails/);
+    for (const o of [{ mergeable: "CONFLICTING" }, { checks: "failure" }, { checks: "pending" }] as const) expect(mergeHint(pr(o))).not.toMatch(/thread/i);
     expect(mergeHint(pr({ checks: "pending" }))).toMatch(/still run/);
     expect(mergeHint(pr({ checks: "success", mergeable: "MERGEABLE" }))).toBeNull();
     expect(mergeHint({ pr: { local: { repo: "shop", branch: "b" } } } as never)).toBeNull();

@@ -26,6 +26,7 @@
 import { createHash } from "node:crypto";
 import { DEFAULT_ACCOUNT } from "../../agents/accounts.js";
 import { backAt, hasRoom, roomLeft, type LoginUse } from "../../agents/loginuse.js";
+import { TOO_LARGE_TEXT } from "../../agents/host.js";
 import type { StopRead } from "../../agents/stopwhy.js";
 import type { AgentRecord } from "../../agents/store.js";
 import type { ConsoleEvent } from "../../events.js";
@@ -45,8 +46,9 @@ export type LimitLogin = { id: string; name: string; loggedIn: boolean; signedOu
 // Continue (agents/api.ts goOnAfterLimit), in the agent's typing lock: the stop mark is read
 // again right before the line. sent: the line was typed. running / no-mark / gone: nothing was
 // typed (it works, Claude went on by itself, or it is closed). dialog: a menu of Claude is on its
-// screen. starting / not-live: its terminal cannot take a line now.
-export type GoOnResult = "sent" | "running" | "no-mark" | "gone" | "dialog" | "starting" | "not-live";
+// screen. starting / not-live: its terminal cannot take a line now. too-large: a headless
+// worker's limit (host.ts TooLarge).
+export type GoOnResult = "sent" | "running" | "no-mark" | "gone" | "dialog" | "starting" | "not-live" | "too-large";
 
 // What the agents' side gives (agents/api.ts limitOps).
 export type LimitAgents = {
@@ -383,6 +385,7 @@ export class LimitTicket {
       case "gone": return { ok: false, text: "The agent is closed." };
       case "starting": return { ok: false, text: "The agent is starting: press again in a moment." };
       case "not-live": return { ok: false, text: "The agent is not live: open it in the console." };
+      case "too-large": return { ok: false, text: TOO_LARGE_TEXT };
     }
   }
 }

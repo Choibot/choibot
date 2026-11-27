@@ -15,7 +15,8 @@ import { createServer } from "node:net";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { persistCommand, sessionTreePids } from "../agents/terminal.js";
+import { helperEnv, persistCommand, sessionTreePids } from "../agents/terminal.js";
+import { onboardedLaunch } from "../agents/runtimes/claude-trust.js";
 import { parseRead, setCloneExec, type Run as CloneRun } from "../agents/agentclone.js";
 import { spawnAgent } from "../agents/spawn.js";
 import { SessionStore } from "../agents/store.js";
@@ -1047,9 +1048,20 @@ describe("choibot-agent-exec: repo-clone, repo-remove, read-file", () => {
 
   // The console's own call, not an env set by hand: spawnAgent runs cloneForAgent, and the sudo
   // call runs this helper as this user (sudo's env_keep is the env the console gives it). The
-  // console has no CLAUDE_CONFIG_DIR of its own, as on a hosted server.
-  it("an agent on a repo starts: repo-clone passes with the env the console gives it, and the agent's spawn gets the same Claude folder", async () => {
+  // console has no CLAUDE_CONFIG_DIR of its own, as on a hosted server. Then the helper's spawn
+  // verb runs the launch the console gave (claude-trust.ts onboardedLaunch): the agent's Node
+  // marks the first-run screens done in the same Claude folder, next to the trust of the clone,
+  // and the program (a fake claude) starts on the session's terminal with its args unchanged.
+  it("an agent on a repo starts: repo-clone passes with the env the console gives it, the agent's spawn gets the same Claude folder, and the helper's spawn of its launch marks that folder and starts the program", async () => {
     mkdirSync(join(home, ".claude"));
+    const seen = join(root, "claude.argv");
+    const fakeClaude = script("fake-claude", [
+      "#!/bin/sh",
+      '[ -t 0 ] && t=tty || t=notty',
+      `{ printf '%s\\0' "$t" "$CLAUDE_CONFIG_DIR" "$@"; } > '${seen}.tmp' && mv '${seen}.tmp' '${seen}'`,
+      "exec sleep 300",
+      "",
+    ].join("\n"));
     for (const d of ["uploads", "settings"]) mkdirSync(join(homes, d), { mode: 0o750 });
     const sudo: CloneRun = (_bin, args, o, cb) => {
       const [, , , helper, ...rest] = args; // -n -u #uid helper verb ...
@@ -1064,11 +1076,13 @@ describe("choibot-agent-exec: repo-clone, repo-remove, read-file", () => {
       vi.stubEnv("CHIEF_CONSOLE_URL", "https://c.example");
       vi.stubEnv("CHIEF_AGENT_UID", "4242");
       vi.stubEnv("AGENT_CLAUDE_CONFIG_DIR", `${home}/.claude`);
+      vi.stubEnv("CLAUDE_CODE_EXECUTABLE", fakeClaude);
       setCloneExec({ sudo: "/usr/bin/sudo", helper: HELPER, uid: 4242 }, sudo);
       setAgentHelper(true);
-      const spawned: { cwd: string; env?: Record<string, string> }[] = [];
+      type Spawned = { cwd: string; command: string; args: string[]; env?: Record<string, string>; helperLaunch?: { command: string; args: string[] } };
+      const spawned: Spawned[] = [];
       const d = {
-        terminals: { spawn: (o: { cwd: string; env?: Record<string, string> }) => { spawned.push(o); }, kill: () => {} } as never,
+        terminals: { spawn: (o: Spawned) => { spawned.push(o); }, kill: () => {} } as never,
         store: new SessionStore(join(root, "store")), hub: new EventHub(), workspaceDir: ws, worktreeRoot: wt, port: 3100,
       };
       const r = await spawnAgent(d, { repo, prompt: "hi", runtime: "claude" });
@@ -1080,6 +1094,25 @@ describe("choibot-agent-exec: repo-clone, repo-remove, read-file", () => {
       const trust = JSON.parse(readFileSync(join(home, ".claude", ".claude.json"), "utf8"));
       expect(trust.projects[realpathSync(clones)].hasTrustDialogAccepted).toBe(true);
       expect(spawned.map((o) => [o.cwd, o.env?.CLAUDE_CONFIG_DIR])).toEqual([[dest, `${home}/.claude`]]);
+      const [o] = spawned;
+      expect(o.command).toBe(fakeClaude);
+      expect(o.helperLaunch).toEqual(onboardedLaunch(fakeClaude, o.args));
+
+      // The helper's spawn verb, as terminal.ts calls it (helperSpawnCommand, helperEnv).
+      const s = sock(`choibot-${r.id}.sock`);
+      ptyRun(["spawn", s, dest, "--", o.helperLaunch!.command, ...o.helperLaunch!.args], helperEnv(o.env ?? {}));
+      await waitFor(() => existsSync(seen), 10_000);
+      expect(readFileSync(seen, "utf8").split("\0").slice(0, -1)).toEqual(["tty", `${home}/.claude`, ...o.args]);
+      const cfg = JSON.parse(readFileSync(join(home, ".claude", ".claude.json"), "utf8"));
+      expect(cfg.hasCompletedOnboarding).toBe(true);
+      expect(cfg.projects[realpathSync(clones)].hasTrustDialogAccepted).toBe(true);
+      // No shell stays between dtach and the program: the launch execs it.
+      const programs = (): string[] => {
+        const m = masterOf(s);
+        return m ? childrenOf(m.pid).map((k) => { try { return readFileSync(`/proc/${k}/cmdline`, "utf8").split("\0")[0]; } catch { return "?"; } }) : [];
+      };
+      await waitFor(() => programs().join() === "sleep", 6000).catch(() => {});
+      expect(programs()).toEqual(["sleep"]);
     } finally {
       if (own !== undefined) process.env.CLAUDE_CONFIG_DIR = own;
       setCloneExec(null);

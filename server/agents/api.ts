@@ -38,7 +38,8 @@ import { AgentLoginStatus, agentAuthCommand, agentLoginStatus, type AgentAuth } 
 import { CLONE_DIFF_TOO_LARGE, CLONE_NO_GIT, CLONE_NO_HELPER, agentClones, cloneChangedFiles, cloneDiff, cloneExecOrRefuse, cloneGitState, dropCloneReads, isClone } from "./agentclone.js";
 import { ACTOR_HEADER, FLEET_ACTOR } from "../master/acted.js";
 import { CHIEF_ERR, gateMerge, gateRoute, gateUser, type ChiefGate } from "../chief/gate.js";
-import { closeRefusal, LEAD_DELETE_REFUSAL } from "../chief/leads/close.js";
+import { closeRefusal, LEAD_DELETE_REFUSAL, LEAD_RENAME_RULE, ownerRefusal } from "../chief/leads/close.js";
+import { checkTitle } from "./title.js";
 import { isAgentId } from "../widgets/paths.js";
 import { spawnAgent, makeSpawnDeps, resolveAccount, WORKSPACE_REPO } from "./spawn.js";
 import type { AreaStore } from "../chief/leads/areas.js";
@@ -51,6 +52,7 @@ import { isSubagentId } from "./thread.js";
 import { MAX_SUBAGENTS, hasLaterSubagents, newestWrite, openSubagentDir, subagentIdsOf, subagentStates } from "./subagents.js";
 import { resolveWorkspaceDir } from "../defaults.js";
 import { hostOf } from "./host.js";
+import { HEADLESS_HELD, headless, headlessRemover, removeHeadless, stopHeadlessOff } from "./headless/wiring.js";
 
 // Build a RecoveryCtx from the same deps registerAgentApi uses, so the boot
 // reconciler (server/index.ts) and the resume endpoint share one launch path —
@@ -250,9 +252,11 @@ export function registerAgentApi(
     return rest;
   };
   // A record as a page gets it: the first message of an agent that waits for a login stays on
-  // the server (the page needs only "it waits" and the time).
-  const forPage = <T extends { waitsLogin?: { until: number | null; prompt: string } }>(r: T): T =>
-    (r.waitsLogin ? { ...r, waitsLogin: { until: r.waitsLogin.until } } as unknown as T : r);
+  // the server (the page needs only "it waits" and the time); so does the kept first message.
+  const forPage = <T extends { waitsLogin?: { until: number | null; prompt: string }; firstPrompt?: string; firstPromptAt?: number }>(r: T): T => {
+    const { firstPrompt: _f, firstPromptAt: _fa, ...rest } = r;
+    return (rest.waitsLogin ? { ...rest, waitsLogin: { until: rest.waitsLogin.until } } : rest) as unknown as T;
+  };
 
   app.get("/api/agents", async (req: FastifyRequest) => {
     const strip = await stripToken(req);
@@ -491,13 +495,21 @@ export function registerAgentApi(
   }
 
   app.post("/api/agents", async (req: FastifyRequest, reply: FastifyReply) => {
-    const { prompt, repo, baseBranch, createFrom, branch, runtime, account, model } =
+    const { prompt, repo, baseBranch, createFrom, branch, runtime, account, model, title } =
       (req.body as {
         prompt?: string; repo?: string; baseBranch?: string;
-        createFrom?: string; branch?: string; runtime?: unknown; account?: unknown; model?: unknown;
+        createFrom?: string; branch?: string; runtime?: unknown; account?: unknown; model?: unknown; title?: unknown;
       }) ?? {};
-    // kind/issueId/label/spawnedBy are server-side only — never taken from the
+    // kind/issueId/spawnedBy are server-side only — never taken from the
     // body. With chief on, spawnedBy is the calling agent's own id (spec §13).
+    // The label is the checked `title` (title.ts) of the caller that may spawn; none: the
+    // fallback of spawn.ts.
+    let label: string | undefined;
+    if (title !== undefined) {
+      const t = checkTitle(title);
+      if ("error" in t) return reply.code(400).send({ error: t.error });
+      label = t.title;
+    }
     let spawnedBy: string | undefined;
     if (deps.chief) {
       const caller = await deps.chief.caller(req);
@@ -510,7 +522,7 @@ export function registerAgentApi(
         if (refused) return reply.code(403).send({ error: refused });
       }
     }
-    const r = await spawnAgent(spawnDeps, { prompt, repo, baseBranch, createFrom, branch, runtime, account, model, ...(spawnedBy ? { spawnedBy } : {}) });
+    const r = await spawnAgent(spawnDeps, { prompt, repo, baseBranch, createFrom, branch, runtime, account, model, ...(label ? { label } : {}), ...(spawnedBy ? { spawnedBy } : {}) });
     if (!r.ok) return reply.code(r.code).send({ error: r.error });
     // waitsLogin: no Claude login has room, the agent starts later. startedOn: it started on
     // another login than the default one. The caller (a lead, the page) reads why.
@@ -526,7 +538,9 @@ export function registerAgentApi(
     const target = await store.load(id);
     if (target && isMaster(target)) return reply.code(400).send({ error: "a master agent cannot be stopped" });
     markActed(req, id);
-    (hostOf(id) ?? terminals).kill(id);
+    // A headless worker with the flag off (a run with the flag on started it): its scope stops.
+    if (target?.host === "headless" && !headless()) await stopHeadlessOff(id);
+    else (hostOf(id) ?? terminals).kill(id);
     await store.patch(id, { status: "done" });
     hub.emitEvent({ type: "agent-status", agentId: id, status: "done" });
     return reply.code(202).send({});
@@ -620,6 +634,7 @@ export function registerAgentApi(
       const r = await sendToAgent(terminals, id, goOnText(to, signedOut), deps.sleep, { checkReady: deps.checkReady });
       if (r === "sent") { console.warn(`[accounts] ${id} was told to go on after its move to ${to}`); return; }
       if (r === "not-live") return;
+      if (r === "too-large") { console.warn(`[accounts] ${id}: the go-on line is above the worker's limit: not sent`); return; }
       await sleep(1000);
     }
   }
@@ -628,9 +643,13 @@ export function registerAgentApi(
   // login given, with the first message that was kept for it.
   async function startWaiting(rec: AgentRecord, account: string | undefined, startedOn?: AgentRecord["startedOn"]): Promise<void> {
     const prompt = rec.waitsLogin?.prompt ?? "";
-    await store.patch(rec.id, { account, waitsLogin: undefined, startedOn });
+    // From now on the first message is kept as for any Claude agent (store.ts): a start before
+    // Claude takes it in sends it again.
+    const firstPrompt = prompt.trim() && (rec.runtime ?? "claude") === "claude" && rec.host !== "headless" ? prompt : undefined;
+    const firstPromptAt = firstPrompt !== undefined ? Date.now() : undefined;
+    await store.patch(rec.id, { account, waitsLogin: undefined, startedOn, firstPrompt, firstPromptAt });
     const { waitsLogin: _w, ...rest } = rec;
-    await resumeAgent({ ...rest, account, ...(startedOn ? { startedOn } : {}) }, recoveryCtx, prompt.trim() ? { prompt } : {});
+    await resumeAgent({ ...rest, account, firstPrompt, firstPromptAt, ...(startedOn ? { startedOn } : {}) }, recoveryCtx, prompt.trim() ? { prompt } : {});
     const status = prompt.trim() ? "running" : "idle";
     await store.patch(rec.id, { status });
     hub.emitEvent({ type: "agent-status", agentId: rec.id, status });
@@ -1167,7 +1186,11 @@ export function registerAgentApi(
     // agent): with no helper the record stays, so a later delete can remove the clone.
     const own = await store.load(id);
     if (own && isClone(own)) cloneExecOrRefuse();
-    (hostOf(id) ?? terminals).kill(id); // no-op if not live
+    // A headless worker: its program and its folders go (headless/wiring.ts), also with the flag
+    // off; held by another console: the record stays.
+    const hw = own?.host === "headless" ? headlessRemover() : null;
+    if (hw) await removeHeadless(hw, id);
+    else (hostOf(id) ?? terminals).kill(id); // no-op if not live
     const rec = await store.load(id);
     // The master is deletable (kill + forget the record), but it owns no
     // disposable git state: its "worktree" is its own agent home dir, and
@@ -1198,6 +1221,7 @@ export function registerAgentApi(
       await removeAgent(id);
     } catch (e) {
       if (e instanceof Error && e.message === CLONE_NO_HELPER) return reply.code(409).send({ error: CLONE_NO_HELPER });
+      if (e instanceof Error && e.message === HEADLESS_HELD) return reply.code(409).send({ error: HEADLESS_HELD });
       throw e;
     }
     return reply.code(202).send({});
@@ -1225,6 +1249,15 @@ export function registerAgentApi(
       if (refusal) return reply.code(refusal.code).send({ error: refusal.error });
     }
     markActed(req, id);
+    // A headless worker: its program and its folders go first, also with the flag off (its
+    // session file stays; a reopen starts it again). Held by another console: nothing changes.
+    const hw = (await store.load(id))?.host === "headless" ? headlessRemover() : null;
+    if (hw) {
+      try { await removeHeadless(hw, id); } catch (e) {
+        if (e instanceof Error && e.message === HEADLESS_HELD) return reply.code(409).send({ error: HEADLESS_HELD });
+        throw e;
+      }
+    }
     const r = await closeAgent({ store, kill: (x) => (hostOf(x) ?? terminals).kill(x), emit: (e) => hub.emitEvent(e) }, id);
     if (r === "not-found") return reply.code(404).send({ error: "not found" });
     if (r === "master") return reply.code(400).send({ error: "a master agent cannot be closed" });
@@ -1234,6 +1267,27 @@ export function registerAgentApi(
     return reply.code(202).send({});
   });
   app.post("/api/agents/:id/reopen", resumeRoute);
+
+  // Rename = a new title (title.ts) for the agent's list row and header. With chief on, an agent
+  // caller takes the owner rule of a close (chief/leads/close.ts ownerRefusal): a lead renames
+  // only a worker it spawned; the user and the masters rename every agent.
+  app.post("/api/agents/:id/rename", async (req: FastifyRequest, reply: FastifyReply) => {
+    const { id } = req.params as { id: string };
+    if (!isAgentId(id)) return reply.code(404).send({ error: "not found" });
+    const t = checkTitle((req.body as { title?: unknown } | undefined)?.title);
+    if ("error" in t) return reply.code(400).send({ error: t.error });
+    const target = await store.load(id);
+    if (deps.chief) {
+      const caller = await deps.chief.caller(req);
+      if (caller.level === "lead" && !gateRoute(deps.chief, reply)) return reply;
+      const refusal = ownerRefusal(caller, id, target, "renames", LEAD_RENAME_RULE);
+      if (refusal) return reply.code(refusal.code).send({ error: refusal.error });
+    }
+    if (!target) return reply.code(404).send({ error: "not found" });
+    await store.patch(id, { label: t.title });
+    hub.emitEvent({ type: "agent-renamed", agentId: id, label: t.title });
+    return reply.code(202).send({ id, label: t.title });
+  });
 
   // Drag-to-reorder: the body is the full rail order; each id gets its index.
   app.post("/api/agents/order", async (req: FastifyRequest, reply: FastifyReply) => {
@@ -1301,6 +1355,13 @@ export function registerAgentApi(
     // same write as the status, so the two can't race.
     const reopen = status === "running" && rec.closedAt !== undefined;
     if (reopen) patch.closedAt = undefined;
+    // Claude took a message in: the kept first message is in its session now (store.ts). Also on
+    // Stop (it comes only after a turn): a SessionStart save at the same time as the
+    // UserPromptSubmit one (load, change, save; no lock) can bring the message back.
+    if ((status === "running" || body.hook_event_name === "Stop") && (rec.firstPrompt !== undefined || rec.firstPromptAt !== undefined)) {
+      patch.firstPrompt = undefined;
+      patch.firstPromptAt = undefined;
+    }
     if (Object.keys(patch).length) await store.patch(id, patch);
     // The turn ended: the kept views of its own clone are old now (the page reads them again).
     if (body.hook_event_name === "Stop" && isClone(rec)) dropCloneReads(id);
@@ -1354,7 +1415,14 @@ export function registerAgentApi(
     const now = await stopOf(rec).catch(() => null);
     if (now?.why !== "limit") return "no-mark";
     if (deps.checkReady && terminals.has(id) && !terminals.inputReady(id)) return "starting";
-    return typeIntoAgentWhy(terminals, id, continueText(), deps.sleep);
+    // A headless worker has no own Continue: the console's go-on (the ticket's button or the
+    // auto-continue, headless/wiring.ts) goes one time; a second press in the guard's window
+    // reads as "it goes on already".
+    const hw = rec.host === "headless" ? headless() : null;
+    if (hw?.wentOnLately(id)) return "running";
+    const r = await typeIntoAgentWhy(terminals, id, continueText(), deps.sleep);
+    if (hw && r === "sent") hw.noteGoOn(id);
+    return r;
   });
 
   const limitOps: LimitAgents = {

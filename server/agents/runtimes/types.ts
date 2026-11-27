@@ -65,4 +65,7 @@ export interface AgentRuntime {
   canResume(rec: AgentRecord, cwd: string): Promise<boolean>;
   /** The agent's live plan/task list for the rail. Empty is a normal state. */
   readPlan(rec: AgentRecord, ctx?: PlanCtx): Promise<AgentTask[]>;
+  /** The command of a spawn through the root helper (strong protection), where the console
+   *  cannot prepare the agent's config: a launcher that does it as the agent, then execs `bin`. */
+  helperLaunch?(bin: string, args: string[]): { command: string; args: string[] };
 }

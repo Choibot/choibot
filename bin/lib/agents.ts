@@ -9,11 +9,14 @@ import { createConsoleClient, CliError, msg, type CliEnv } from "./client.js";
 import type { Cli } from "./cli.js";
 import { CLI_NAME } from "../../server/brand.js";
 import { envRead } from "../../server/names.mjs";
+import { checkTitle } from "../../server/agents/title.js";
 
 const HELP = `${CLI_NAME} agents — console agents (local console API)
 
   list                       console agents as JSON
-  spawn                      start an agent; JSON on stdin: {"repo":"<name>","prompt":"…","base":"<branch>"?,"account":"<login id>"?,"model":"fable|opus|sonnet|haiku"?}
+  spawn                      start an agent; JSON on stdin: {"repo":"<name>","title":"<2-5 words>"?,"prompt":"…","base":"<branch>"?,"account":"<login id>"?,"model":"fable|opus|sonnet|haiku"?}
+                             "title": the short name of the task in the agent list (one line, at most 40 characters)
+  rename <id> "<title>"      a new title for an agent (a lead: only a worker it spawned)
   stop <id>                  stop an agent
   resume <id>                resume an agent
   close <id>                 a lead only (chief on): close a worker it spawned whose task is done
@@ -108,7 +111,7 @@ export async function runAgents(sub: string | undefined, rest: string[], overrid
         return 0;
       }
       case "spawn": {
-        let spec: { repo?: unknown; prompt?: unknown; base?: unknown; account?: unknown; model?: unknown };
+        let spec: { repo?: unknown; prompt?: unknown; base?: unknown; account?: unknown; model?: unknown; title?: unknown };
         if (d.stdinIsTTY) throw new CliError("spawn reads JSON on stdin");
         try { spec = JSON.parse(await d.readStdin()); }
         catch (e) { throw new CliError(`invalid JSON on stdin: ${msg(e)}`); }
@@ -121,11 +124,18 @@ export async function runAgents(sub: string | undefined, rest: string[], overrid
         if (spec.account !== undefined && (typeof spec.account !== "string" || !spec.account.trim())) throw new CliError("spawn: \"account\" must be the id of a Claude login");
         // The model of the new agent; none = its login's default. The console checks the name.
         if (spec.model !== undefined && (typeof spec.model !== "string" || !spec.model.trim())) throw new CliError("spawn: \"model\" must be fable, opus, sonnet or haiku");
+        // The agent's name in the list (title.ts); none: the start of the prompt, as before.
+        let title: string | undefined;
+        if (spec.title !== undefined) {
+          const t = checkTitle(spec.title);
+          if ("error" in t) throw new CliError(`spawn: ${t.error}`);
+          title = t.title;
+        }
         const { repos } = (await call("GET", "/api/repos")) as { repos: { name: string; path: string }[] };
         const match = repos.find((r) => r.name === (spec.repo as string).trim());
         if (!match) throw new CliError(`unknown repo: ${spec.repo}`);
         print(await call("POST", "/api/agents", {
-          repo: match.path, prompt: spec.prompt, ...(spec.base ? { baseBranch: spec.base } : {}),
+          repo: match.path, prompt: spec.prompt, ...(title ? { title } : {}), ...(spec.base ? { baseBranch: spec.base } : {}),
           ...(typeof spec.account === "string" ? { account: spec.account.trim() } : {}),
           ...(typeof spec.model === "string" ? { model: spec.model.trim() } : {}),
         }));
@@ -136,6 +146,16 @@ export async function runAgents(sub: string | undefined, rest: string[], overrid
       case "delete": {
         const id = needId(sub, rest[0], d.env);
         print(await call("POST", `/api/agents/${enc(id)}/${sub}`, undefined, true));
+        return 0;
+      }
+      case "rename": {
+        // The server decides who may rename (the close's owner rule); the CLI checks the title.
+        const id = rest[0];
+        const raw = rest.slice(1).join(" ");
+        if (!id || !raw.trim()) throw new CliError(`usage: ${CLI_NAME} agents rename <id> "<title>"`);
+        const t = checkTitle(raw);
+        if ("error" in t) throw new CliError(`rename: ${t.error}`);
+        print(await call("POST", `/api/agents/${enc(id)}/rename`, { title: t.title }));
         return 0;
       }
       case "close": {

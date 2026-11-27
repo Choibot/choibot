@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentRecord } from "../agents/store.js";
 import type { QueueItem } from "../chief/queue/types.js";
-import { FIRST_AGENT_LABEL, FIRST_TASK_PROMPT, FIRST_TASK_TITLE, FirstAgent, ticketOf, ticketState } from "./firstagent.js";
+import { FIRST_AGENT_LABEL, FIRST_TASK_PROMPT, FIRST_TASK_TITLE, FirstAgent, NO_SESSION_MS, ticketOf, ticketState } from "./firstagent.js";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "setup-first-")); });
@@ -92,6 +92,42 @@ describe("view", () => {
     records.set("a1", rec("a1", { status: "error" })); expect(await state()).toBe("error");
     records.set("a1", rec("a1", { status: "idle", closedAt: 5 })); expect(await state()).toBe("closed");
     records.delete("a1"); expect(await state()).toBe("gone");
+  });
+
+  it("gives the error's own sentence when the Claude program cut the last turn, and none while it works", async () => {
+    const { first, records } = make();
+    await first.start();
+    const stop = { why: "model" as const, text: "API Error: 400 the model is not there", at: 1 };
+    records.set("a1", rec("a1", { status: "error", stop }));
+    expect((await first.view()).agent?.error).toBe("API Error: 400 the model is not there");
+    records.set("a1", rec("a1", { status: "running", stop }));
+    expect((await first.view()).agent).not.toHaveProperty("error");
+    records.set("a1", rec("a1", { status: "error" }));
+    expect((await first.view()).agent).not.toHaveProperty("error");
+  });
+
+  it("says when Claude has not taken the task in, a short time after the start", async () => {
+    const { first, records, tick } = make();
+    await first.start();
+    records.set("a1", rec("a1", { firstPrompt: "the task" }));
+    expect((await first.view()).agent?.noSession).toBe(false);          // a first turn takes seconds
+    tick(NO_SESSION_MS - 1);
+    expect((await first.view()).agent?.noSession).toBe(false);
+    tick(1);
+    expect((await first.view()).agent?.noSession).toBe(true);
+    records.set("a1", rec("a1"));                                       // the first turn started
+    expect((await first.view()).agent?.noSession).toBe(false);
+  });
+
+  // An agent that waited for a login starts later than the press: the 90 s count from its start.
+  it("counts the time from the start that sent the task (firstPromptAt), not from the press", async () => {
+    const { first, records, tick } = make();
+    await first.start();                                                 // the press, at 1000
+    tick(5 * NO_SESSION_MS);                                             // it waits for a login
+    records.set("a1", rec("a1", { firstPrompt: "the task", firstPromptAt: 1000 + 5 * NO_SESSION_MS }));
+    expect((await first.view()).agent?.noSession).toBe(false);
+    tick(NO_SESSION_MS);
+    expect((await first.view()).agent?.noSession).toBe(true);
   });
 
   it("shows the pull request ticket of the first agent, and of no other agent", async () => {

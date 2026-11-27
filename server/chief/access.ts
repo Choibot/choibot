@@ -89,7 +89,7 @@ export const WORKER_RULES: readonly Rule[] = [
 ];
 
 // A lead: a worker's list, plus its workers (its prompt, server/chief/leads/prompt.ts: agents
-// spawn, list, resume, close; leads report; queue show and recommend on its workers' items).
+// spawn, list, resume, close, rename; leads report; queue show and recommend on its workers' items).
 // It reads the thread and the screen only of a worker that IT spawned (the record's spawnedBy).
 // `queue list`: every item, as before (the route filters only a worker's list).
 const LEAD_ITEM_ROUTES: ReadonlySet<RouteKey> = new Set(["GET /api/queue/:id", "GET /api/queue/:id/page"]);
@@ -109,6 +109,8 @@ export const LEAD_RULES: readonly Rule[] = [
   { route: "POST /api/agents/:id/stop", target: "spawned" },
   { route: "POST /api/agents/:id/resume", target: "spawned" },
   { route: "POST /api/agents/:id/close", target: "spawned" },
+  // The title of a worker in the list (agents/api.ts rename: the same owner rule as close).
+  { route: "POST /api/agents/:id/rename", target: "spawned" },
   // The review of a worker's change (strong protection: no GitHub login, and nothing is run in
   // the worker's folder): its recorded PR from GitHub by the console's login, and its own report.
   { route: "GET /api/agents/:id/pr-diff", target: "spawned" },

@@ -14,7 +14,9 @@ export type AgentEvent =
   | { type: "agent-reopened"; agentId: string }
   // Chief on: an agent was closed (the user's ✕ or its lead's `agents close`);
   // the rail moves it to the Closed section.
-  | { type: "agent-closed"; agentId: string };
+  | { type: "agent-closed"; agentId: string }
+  // The agent got a new title (POST /api/agents/:id/rename): the list and the header show it.
+  | { type: "agent-renamed"; agentId: string; label: string };
 
 // The terminal dialog an agent waits on changed (agents/prompt-watch.ts): one
 // appeared (`kind` set), its options or selection changed (a new `rev`), or it

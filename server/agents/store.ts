@@ -32,6 +32,11 @@ export type AgentRecord = {
   // The model the agent starts and resumes on (`--model`, model.ts), set at spawn only.
   // Absent = the console's setting (startModel). Codex agents never have one.
   model?: AgentModel;
+  // The model of the agent's last start: the --model the console passed (spawn.ts, recovery.ts).
+  // A start with no --model (a lead or the fleet master that resumes its session) keeps it: the
+  // session goes on on the model it was saved on. Absent = not known (a start from before this
+  // field, a Codex agent): the page then shows no model.
+  runModel?: string;
   // Rail position set by drag-to-reorder. Absent = after every ordered agent,
   // by createdAt.
   order?: number;
@@ -66,6 +71,19 @@ export type AgentRecord = {
   // comes back or when the user moves it. `prompt`: its first message, kept until then (it
   // never goes to a page).
   waitsLogin?: { until: number | null; prompt: string };
+  // The first message of a Claude agent, kept until Claude takes it in (the UserPromptSubmit
+  // hook; the Stop hook too, as two hooks at the same time can save it back). A start with no
+  // session to resume before that (a move to another login, a restart, a relaunch) sends it
+  // again: else the agent starts with no task. It never goes to a page. A Codex agent has none:
+  // its hooks can fail, and it would get its first task again at each start. A headless worker
+  // has none either: its first message is a message of its stream (headless/wiring.ts).
+  firstPrompt?: string;
+  // When a start last sent firstPrompt (the set-up counts its 90 s from it, not from the press:
+  // an agent can wait for a login first).
+  firstPromptAt?: number;
+  // "headless": the worker runs as `claude -p` with stream-json (agents/headless/), not in a
+  // terminal. Set at spawn only, while AGENT_HEADLESS=1 (headless/wiring.ts). Absent = a terminal.
+  host?: "headless";
 };
 
 // The fleet master is an agent record but not a worker: no repo, no disposable

@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { NO_MERGE_RULE, brainPrompt } from "../brain/prompt.js";
 import { remindAgentPrompt } from "../remind/prompt.js";
 import { TOKEN_RULES } from "../../agents/argv.js";
-import { LEAD_MODEL_RULE, leadClosePrompt, leadSystemPrompt } from "./prompt.js";
+import { LEAD_MODEL_RULE, WORKER_TITLE_RULE, leadClosePrompt, leadSystemPrompt } from "./prompt.js";
 
 const base = { area: "app-shop", charter: "Own the app.", repos: ["app-shop", "ui-kit"], cli: "C", brain: "## Master only\n- m [r_1]", chiefDir: "/chief" };
 
@@ -40,7 +40,7 @@ describe("leadSystemPrompt", () => {
   });
   it("lists repos, cli verbs, merge-pr refusal, reports, queue and recommend", () => {
     expect(p).toContain("Spawn only in: app-shop, ui-kit.");
-    expect(p).toContain("`C agents spawn|list|stop|resume|close`");
+    expect(p).toContain("`C agents spawn|list|stop|resume|close|rename`");
     expect(p).toContain("`merge-pr` and `delete` are refused for leads");
     expect(p).toContain("C leads report");
     // The quiet policy: the lead marks what its report asks for.
@@ -60,6 +60,12 @@ describe("leadSystemPrompt", () => {
     expect(rule).toContain("deleted after 7 days; `agents resume <id>` reopens it.");
     expect(rule).toContain("Say in your next report which workers you closed.");
     expect(rule).not.toContain("<cli>");
+  });
+  it("says in ## Agents to give each worker a title, with the spawn example", () => {
+    const agents = p.slice(p.indexOf("## Agents"), p.indexOf(NO_MERGE_RULE));
+    expect(agents).toContain(WORKER_TITLE_RULE);
+    expect(WORKER_TITLE_RULE).toContain("a title of 2 to 5 words that names its task");
+    expect(WORKER_TITLE_RULE).toContain('"title":"<2-5 words>"');
   });
   it("says in ## Agents when to give a worker a model, and that helper sub-agents follow the same rule", () => {
     const agents = p.slice(p.indexOf("## Agents"), p.indexOf(NO_MERGE_RULE));
