@@ -30,14 +30,15 @@ export type AgentPhase = "none" | "work" | "stop" | "pr";
 export type Scene = { parts: string; act: SceneAct };
 
 // The first agent, from the same words as its card (firstSay): it works, it stopped (the card
-// offers "Try again"), it has no session yet (the card offers its terminal: it waits for the
-// user, so the same calm sign as a stop), its pull request is there, or nothing yet.
+// offers "Try again"), it has no session yet (the card offers its terminal) or a dialog of Claude
+// waits on its card (both wait for the user, so the same calm sign as a stop), its pull request
+// is there, or nothing yet.
 export function agentPhase(v: FirstView | null | undefined): AgentPhase {
   if (!v?.agent) return "none";
   const say = firstSay(v);
   if (say.tone === "run") return "work";
   if (say.tone === "ok") return "pr";
-  return say.acts.includes("again") || say.acts.includes("terminal") ? "stop" : "none";
+  return say.acts.includes("again") || say.acts.includes("terminal") || v.agent.dialog ? "stop" : "none";
 }
 
 // The steps that are done. The one row "Connect GitHub" of the GitHub app holds two checks: its

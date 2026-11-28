@@ -20,7 +20,7 @@
 //      subprotocol. An upgrade outside /api is refused at 3 already (the editor's and Next's own).
 //      With the proof, a request gets what that device gets on loopback, no more: the first-run
 //      lock and the USER gate stand as they are.
-import { createHash, timingSafeEqual, X509Certificate } from "node:crypto";
+import { createHash, createHmac, timingSafeEqual, X509Certificate } from "node:crypto";
 import { closeSync, constants, fstatSync, openSync, readFileSync } from "node:fs";
 import type { IncomingMessage, Server as HttpServer, ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -111,10 +111,34 @@ export function localAddressIn(network: string, interfaces: ReturnType<typeof ne
 // ------------------------------------------------------------ the gate
 
 const proxySockets = new WeakSet<Socket>();
-const trusted = new WeakSet<IncomingMessage>();
+// A request that came over the proxy listener with the right token, and that token: the headers
+// never hold it, it is kept here for doorProofOk only.
+const trusted = new WeakMap<IncomingMessage, string>();
 
 // server/auth.ts: a request that came over the proxy listener with the right token.
 export const isTrustedProxyRequest = (req: IncomingMessage): boolean => trusted.has(req);
+
+// A proof that only the door's own control path can make (server/chief/firstrun.ts RELINK_ROUTE):
+// HMAC-SHA256 of a text of that one call, with the door's token of this console as the key, in
+// lower-case hex. The door adds its token to a browser's request after the browser, so a request
+// that a browser made cannot carry a right proof, through any door (an old one too).
+export const doorProof = (token: string, message: string): string => createHmac("sha256", token).update(message, "utf8").digest("hex");
+// The longest key that the proof takes, in bytes: HMAC-SHA256 replaces a key longer than its
+// block (64 bytes) with the key's SHA-256, and that is CONSOLE_PROXY_TOKEN_SHA256, which is not a
+// secret (the settings and the server's cloud user data hold it; an agent can read it). So with a
+// longer token, the hash would make a right proof. The gate takes a token of up to 128
+// characters; the door's token has 43.
+export const DOOR_PROOF_MAX_KEY_BYTES = 64;
+export function doorProofValid(token: string, message: string, proof: unknown): boolean {
+  if (Buffer.byteLength(token, "utf8") > DOOR_PROOF_MAX_KEY_BYTES) return false;
+  if (typeof proof !== "string" || !/^[0-9a-f]{64}$/.test(proof)) return false;
+  return timingSafeEqual(Buffer.from(proof, "hex"), Buffer.from(doorProof(token, message), "hex"));
+}
+// The proof of a request: false for a request that did not come over the proxy listener.
+export function doorProofOk(req: IncomingMessage, message: string, proof: unknown): boolean {
+  const token = trusted.get(req);
+  return token !== undefined && doorProofValid(token, message, proof);
+}
 
 const sha256 = (s: string): Buffer => createHash("sha256").update(s, "utf8").digest();
 
@@ -169,7 +193,7 @@ export function installProxyGate(server: HttpServer, tokenSha256: string | null)
       if (proxySockets.has(req.socket)) {
         const upgradeOutsideApi = event === "upgrade" && !(req.url ?? "").startsWith("/api/");
         const ok = !NEVER_FROM_PROXY.has(event) && !upgradeOutsideApi && want !== null && token !== undefined && token.length <= 128 && timingSafeEqual(sha256(token), want);
-        if (!ok) {
+        if (!ok || token === undefined) {
           if (REQUEST_EVENTS.has(event)) {
             const res = args[1] as ServerResponse;
             res.writeHead(403, { "content-type": "text/plain; charset=utf-8", "content-length": String(FORBIDDEN.length), connection: "close" });
@@ -184,7 +208,7 @@ export function installProxyGate(server: HttpServer, tokenSha256: string | null)
           }
           return true;
         }
-        trusted.add(req);
+        trusted.set(req, token);
       }
     }
     return emit(event, ...args);
@@ -194,10 +218,13 @@ export function installProxyGate(server: HttpServer, tokenSha256: string | null)
 // ------------------------------------------------------------ deny by default
 
 // The pairing APIs: the first device's claim (the /first-run page: GET for its state, POST for
-// the claim link or the box code), the code of "Add a device" (the /pair page) and the pairing
-// link of log or Telegram mode (`#pair=`, src/components/PairCard.tsx).
+// the claim link or the box code), the code of "Add a device" (the /pair page), the pairing
+// link of log or Telegram mode (`#pair=`, src/components/PairCard.tsx), and the door's new claim
+// link (server/chief/firstrun.ts RELINK_ROUTE, GET to read if it may, POST to make one: the route
+// itself takes this listener only).
 export const PAIRING_ROUTES: readonly string[] = [
   "GET /api/chief/pair/first", "POST /api/chief/pair/first", "POST /api/chief/devices/claim", "POST /api/chief/pair/claim",
+  "GET /api/chief/pair/relink", "POST /api/chief/pair/relink",
 ];
 const ICONS = new Set(["/favicon.ico", "/icon.svg", "/apple-icon.png"]);
 

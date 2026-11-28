@@ -75,7 +75,7 @@ export const BAND_ZONE = { from: 3 / 8, width: 3 / 8 };
 
 export function bandAt(view: FirstView | null): number | null {
   const a = view?.agent;
-  if (!view || !a || a.state !== "working" || a.noSession || view.ticket) return null;
+  if (!view || !a || a.state !== "working" || a.noSession || a.dialog || view.ticket) return null;
   return Math.min(1, Math.max(0, (view.now - a.startedAt) / BAND_MS));
 }
 

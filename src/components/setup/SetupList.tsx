@@ -34,7 +34,6 @@ export type SetupNav = {
   // Open a section of Settings.
   go?: (section: string) => void;
   onNewAgent?: () => void;
-  onOpenQueue?: () => void;
   // Open the agent where its terminal shows: the first agent with no session (its pane shows the
   // terminal when it has no session). The set-up opens no agent thread.
   onOpenTerminal?: (id: string) => void;
@@ -167,7 +166,7 @@ export function StepAction({ row, nav, onDone, auto = false, stage = false }: {
     case "agent":
       return <FirstAgentStep onDone={onDone} stage={stage} onOpenTerminal={nav.onOpenTerminal} />;
     case "merge":
-      return <FirstPrStep onDone={onDone} nav={nav} />;
+      return <FirstPrStep onDone={onDone} stage={stage} />;
     case "phone":
       // The code picture for the phone, in the row. After the add: the row of the phone with Revoke.
       return <AddDevice what="phone" row auto={auto} onAdded={onDone} />;

@@ -141,6 +141,23 @@ describe("resumeAgent", () => {
     expect(spawned[0].helperLaunch).toEqual(onboardedLaunch(claudeRuntime.bin(), spawned[0].args));
   });
 
+  // The launcher writes the trust of the agent's own clone (claude-trust.ts): the folder comes
+  // from AGENT_HOME_ROOT and the record's id, never from its cwd or worktree.
+  it("a relaunch of an agent with its own clone gives the launcher AGENT_HOME_ROOT/clones/<id>", async () => {
+    // AGENT_HOME_ROOT counts only on a hardened deployment (chief/homes.ts agentHomeRoot).
+    const env = {
+      CHIEF_ENABLED: "1", CHIEF_USER_AUTH: "log", CHIEF_CONSOLE_URL: "http://127.0.0.1:4999", CHIEF_AGENT_UID: "1001",
+      AGENT_CLAUDE_CONFIG_DIR: "/home/choibot-agent/.claude", AGENT_HOME_ROOT: "/srv/choibot/agent-homes",
+    };
+    for (const [k, v] of Object.entries(env)) vi.stubEnv(k, v);
+    try {
+      const r1 = rec({ id: "r1", clone: true, repo: "/ws/app", worktree: "/elsewhere", cwd: "/elsewhere" });
+      const { ctx, spawned } = fakeCtx([r1]);
+      await resumeAgent(r1, ctx);
+      expect(spawned[0].helperLaunch).toEqual(onboardedLaunch(claudeRuntime.bin(), spawned[0].args, "/srv/choibot/agent-homes/clones/r1"));
+    } finally { vi.unstubAllEnvs(); }
+  });
+
   // The live fault: agent 1 was killed and started again before its first turn, with no prompt.
   it("a start with no session to resume sends the kept first message; a resume does not; a new prompt wins", async () => {
     const SID = "11111111-1111-4111-8111-111111111111";

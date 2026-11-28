@@ -106,6 +106,7 @@ function firstError(v: FirstView): string | null {
   const a = v.agent;
   if (!a || v.ticket?.state === "open" || v.ticket?.state === "merged") return null;
   if (v.ticket) return "The pull request of the first agent was closed and not merged.";
+  if (a.dialog && (a.state === "working" || a.state === "waiting")) return "Claude asks the first agent a question. Its answers are on the step card.";
   if (a.noSession && (a.state === "working" || a.state === "waiting")) return "The first agent has no session yet. Claude may wait for an answer on its terminal screen.";
   switch (a.state) {
     case "working": return null;

@@ -9,6 +9,9 @@ import { STEPS, type StepStatus } from "../../../server/setup/steps";
 import type { SetupAnswer } from "../../lib/setup";
 import type { SetupView } from "../../lib/useSetup";
 import type { FirstView } from "../../lib/setupActions";
+import type { PromptState } from "../../lib/prompt";
+import { prefetchPrompt } from "../../lib/usePrompt";
+import { PromptCard } from "../PromptCard";
 import { AgentState } from "./FirstAgentStep";
 import { SetupStage } from "./Stage";
 
@@ -125,6 +128,42 @@ describe("the first agent on the stage", () => {
     expect(html).not.toMatch(/thread/i);
     // with no terminal handler (no place to open it), no button
     expect(draw(v, null)).not.toContain("Open its terminal");
+  });
+
+  // The owner (hosted console, release 867): the first agent waited on Claude's folder question,
+  // and the set-up said nothing of it ("they have to go there manually").
+  it("a dialog of Claude: Waiting for you and the agent pane's own card, with its question and answers; no terminal, no band, no marks", async () => {
+    const prompt: PromptState = {
+      kind: "folder-trust", question: "Is this a project you created or one you trust?", detail: "/srv/choibot/agent-homes/clones/a7",
+      options: [{ label: "Yes, I trust this folder", keys: ["enter"] }, { label: "No, exit", keys: ["down", "enter"] }],
+      selected: 0, screenText: "", rev: "abc123",
+    } as PromptState;
+    // The card's first frame comes from the memory of the pane's hook (lib/usePrompt): its read of
+    // GET /api/agents/a7/prompt, as the pane reads it.
+    const asked: string[] = [];
+    vi.stubGlobal("fetch", vi.fn(async (url: string) => { asked.push(url); return new Response(JSON.stringify({ live: true, prompt }), { status: 200 }); }));
+    try { await prefetchPrompt("a7"); } finally { vi.unstubAllGlobals(); }
+    expect(asked).toEqual(["/api/agents/a7/prompt"]);
+    const v = first({ id: "a7", dialog: "folder-trust", noSession: true });
+    const html = renderToStaticMarkup(createElement(AgentState, { view: v, set: () => {}, onChange: () => {}, onOpenTerminal: () => {}, stage: { now: null }, more: { label: "the task", body: "TASK" } }));
+    expect(html).toContain(">Waiting for you</span>");
+    expect(html).toContain("Is this a project you created or one you trust?");
+    expect(html).toContain(">Yes, I trust this folder<");
+    expect(html).toContain(">No, exit<");
+    // the same component as the agent's pane, drawn the same
+    expect(html).toContain(renderToStaticMarkup(createElement(PromptCard, { prompt, who: "agent-1", busy: false, note: null, onPress: () => {} })));
+    expect(count(html, /aria-label="The agent waits on a prompt"/g)).toBe(1);
+    expect(html).not.toContain("Open its terminal");
+    expect(html).not.toContain("role=\"img\"");
+    expect(html).not.toContain("Ticket in the Queue");
+    expect(html).not.toMatch(/thread/i);
+    // the view names a dialog, the card is not read yet: the line only, still no terminal
+    const before = renderToStaticMarkup(createElement(AgentState, { view: first({ id: "a8", dialog: "folder-trust", noSession: true }), set: () => {}, onChange: () => {}, onOpenTerminal: () => {}, stage: { now: null } }));
+    expect(before).toContain(">Waiting for you</span>");
+    expect(before).not.toContain("The agent waits on a prompt");
+    expect(before).not.toContain("Open its terminal");
+    // no dialog in the view: no card, even with a remembered one (the pane's hook reads nothing)
+    expect(draw(first({ id: "a7" }), null)).not.toContain("The agent waits on a prompt");
   });
 
   it("while it works, and when its pull request is open: no way to the thread of the agent", () => {

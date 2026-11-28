@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { AgentRecord } from "../agents/store.js";
 import type { QueueItem } from "../chief/queue/types.js";
-import { FIRST_AGENT_LABEL, FIRST_TASK_PROMPT, FIRST_TASK_TITLE, FirstAgent, NO_SESSION_MS, ticketOf, ticketState } from "./firstagent.js";
+import { FIRST_AGENT_LABEL, FIRST_TASK_PROMPT, FIRST_TASK_TITLE, FirstAgent, NO_SESSION_MS, ticketOf, ticketState, type FirstAgentDeps } from "./firstagent.js";
 
 let dir: string;
 beforeEach(() => { dir = mkdtempSync(join(tmpdir(), "setup-first-")); });
@@ -22,7 +22,7 @@ const pr = (id: string, agentId: string, o: Partial<QueueItem> = {}): QueueItem 
   pr: { url: "https://github.com/acme/shop/pull/128", number: 128 }, ...o,
 } as QueueItem);
 
-function make(o: { repo?: { name: string; path: string } | null; repos?: { name: string; path: string }[]; spawnFails?: string } = {}) {
+function make(o: { repo?: { name: string; path: string } | null; repos?: { name: string; path: string }[]; spawnFails?: string; dialog?: (id: string) => Promise<string | null> } = {}) {
   const records = new Map<string, AgentRecord>();
   const items: QueueItem[] = [];
   const spawned: { prompt: string; repo: string; label: string }[] = [];
@@ -40,6 +40,7 @@ function make(o: { repo?: { name: string; path: string } | null; repos?: { name:
       return { ok: true, id };
     },
     tickets: async () => items,
+    ...(o.dialog ? { dialog: o.dialog as NonNullable<FirstAgentDeps["dialog"]> } : {}),
     changed: () => { changed++; },
     now: () => t,
     log: (s) => logs.push(s),
@@ -60,7 +61,7 @@ describe("the task", () => {
 describe("view", () => {
   it("before the start: the task and the repo the button will use, no agent", async () => {
     const { first, spawned } = make();
-    expect(await first.view()).toEqual({ task: FIRST_TASK_TITLE, repo: "shop", repos: ["shop"], agent: null, ticket: null, now: 1000 });
+    expect(await first.view()).toEqual({ task: FIRST_TASK_TITLE, repo: "shop", repos: ["shop"], agent: null, ticket: null, other: null, now: 1000 });
     expect(spawned).toEqual([]);
     expect(existsSync(join(dir, "setup"))).toBe(false);
   });
@@ -130,6 +131,46 @@ describe("view", () => {
     expect((await first.view()).agent?.noSession).toBe(true);
   });
 
+  // The owner's first agent on a hosted console (release 867) waited on Claude's folder question,
+  // and the set-up showed nothing of it. Now the view names a known dialog for the card.
+  it("names a known dialog on the agent's screen, while the agent is there and has no ticket", async () => {
+    let kind: string | null = "folder-trust";
+    const asked: string[] = [];
+    const { first, records, items } = make({ dialog: async (id) => { asked.push(id); return kind; } });
+    await first.start();
+    records.set("a1", rec("a1", { firstPrompt: "the task" }));
+    expect((await first.view()).agent?.dialog).toBe("folder-trust");
+    records.set("a1", rec("a1", { status: "idle" }));
+    expect((await first.view()).agent?.dialog).toBe("folder-trust");
+    expect(asked.every((id) => id === "a1")).toBe(true);
+    // a screen the console does not know, no dialog, a failed read: none (its terminal shows it)
+    for (const k of ["unknown", null]) { kind = k; expect((await first.view()).agent).not.toHaveProperty("dialog"); }
+    kind = "login-method";
+    expect((await first.view()).agent?.dialog).toBe("login-method");
+    const n = asked.length;
+    // closed, ended, an error, gone: no read
+    for (const r of [rec("a1", { closedAt: 5 }), rec("a1", { status: "done" }), rec("a1", { status: "error" })]) {
+      records.set("a1", r);
+      expect((await first.view()).agent).not.toHaveProperty("dialog");
+    }
+    records.delete("a1");
+    expect((await first.view()).agent).not.toHaveProperty("dialog");
+    // a ticket of its pull request: no read
+    records.set("a1", rec("a1"));
+    items.push(pr("q1", "a1"));
+    expect((await first.view()).agent).not.toHaveProperty("dialog");
+    expect(asked.length).toBe(n);
+  });
+
+  it("names no dialog when the read fails, or with no reader", async () => {
+    const { first } = make({ dialog: async () => { throw new Error("no"); } });
+    await first.start();
+    expect((await first.view()).agent).not.toHaveProperty("dialog");
+    const plain = make();
+    await plain.first.start();
+    expect((await plain.first.view()).agent).not.toHaveProperty("dialog");
+  });
+
   it("shows the pull request ticket of the first agent, and of no other agent", async () => {
     const { first, items } = make();
     await first.start();
@@ -139,6 +180,29 @@ describe("view", () => {
     expect(await first.view()).toMatchObject({ ticket: { id: "qfirst001", state: "open" }, agent: { pullRequest: true } });
     items[1] = pr("qfirst001", "a1", { status: "withdrawn", lastError: "merged" });
     expect((await first.view()).ticket).toEqual({ id: "qfirst001", state: "merged" });
+  });
+
+  it("names the newest waiting pull request of another agent while the first agent has none that waits", async () => {
+    const { first, items } = make();
+    // No first agent yet (the user's own agent opened a pull request): the card merges that one.
+    items.push(pr("qolder001", "u1", { createdAt: 5 }), pr("qnewer002", "u2", { createdAt: 20 }));
+    items.push(pr("qlocal003", "u3", { createdAt: 30, pr: { local: { repo: "shop", branch: "b" } } as never }));
+    items.push(pr("qshut0004", "u4", { createdAt: 40, status: "withdrawn", lastError: "closed" }));
+    expect(await first.view()).toMatchObject({ agent: null, ticket: null, other: { id: "qnewer002" } });
+    await first.start();
+    expect(await first.view()).toMatchObject({ ticket: null, other: { id: "qnewer002" } });
+    // The first agent's ticket that waits comes first: no other.
+    items.push(pr("qfirst001", "a1", { createdAt: 50 }));
+    expect(await first.view()).toMatchObject({ ticket: { id: "qfirst001", state: "open" }, other: null });
+    // It was closed and not merged: the other one again.
+    items[items.length - 1] = pr("qfirst001", "a1", { createdAt: 50, status: "withdrawn", lastError: "closed" });
+    expect(await first.view()).toMatchObject({ ticket: { id: "qfirst001", state: "closed" }, other: { id: "qnewer002" } });
+  });
+
+  it("names no other pull request when none waits", async () => {
+    const { first, items } = make();
+    items.push(pr("qdone0001", "u1", { status: "withdrawn", lastError: "merged" }), { ...pr("qask00002", "u2"), kind: "question" } as QueueItem);
+    expect((await first.view()).other).toBeNull();
   });
 
   it("knows a pull request that has no ticket yet", async () => {

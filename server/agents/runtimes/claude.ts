@@ -16,7 +16,7 @@ import { runsAsChief } from "../../chief/chiefaccount.js";
 import { hardenedDeployment, helperSpawn } from "../../chief/hardened.js";
 import { resolveClaudeBin } from "../../defaults.js";
 import { names } from "../../names.mjs";
-import { CLONE_NO_HELPER, cloneFolders, isClone, ownFolderProblem } from "../agentclone.js";
+import { CLONE_NO_HELPER, cloneFolders, clonePath, isClone, ownFolderProblem } from "../agentclone.js";
 import { ensureSessionAsAgent } from "../sessionread.js";
 import { readPlanAsAgent } from "../tasksread.js";
 
@@ -165,8 +165,13 @@ export const claudeRuntime: AgentRuntime = {
   bin: () => resolveClaudeBin(),
 
   // Through the helper the console writes nothing into the agent's config: the agent marks its
-  // first-run screens done itself (claude-trust.ts ONBOARD_JS), then Claude starts.
-  helperLaunch: (bin, args) => onboardedLaunch(bin, args),
+  // first-run screens done itself (claude-trust.ts ONBOARD_JS), then Claude starts. An agent with
+  // its own clone names it (AGENT_HOME_ROOT/clones/<id>, from its id only): a git repo root, where
+  // the helper's trust of the clones' folder does not count.
+  helperLaunch: (bin, args, rec) => {
+    const f = isClone(rec) ? cloneFolders() : null;
+    return onboardedLaunch(bin, args, f ? clonePath(f, rec.id) : undefined);
+  },
 
   async prepare(rec, ctx: PrepareCtx): Promise<PrepareResult> {
     // Hardened (ruling F1): AGENT_CLAUDE_CONFIG_DIR or a refusal, before any write.
@@ -210,7 +215,8 @@ export const claudeRuntime: AgentRuntime = {
     // tab where somebody would see the dialog) and the fleet master's (a new install).
     // A worker's folder is the user's: there the user answers the dialog in the agent's pane.
     // Hardened (ruling 2c-7-a): no write; the console never writes into agent-owned dirs.
-    // Never for an agent's own clone (strong protection): the console writes no trust there.
+    // Never for an agent's own clone (strong protection): the console writes no trust there (its
+    // launcher does, as the agent: helperLaunch above).
     if (CONSOLE_HOME_KINDS.has(rec.kind ?? "") && !hardenedDeployment() && !isClone(rec)) {
       trustClaudeDir(claudeJsonPath(rec.account, paths), rec.cwd ?? (rec.repo ? rec.worktree : ctx.workspaceDir));
     }

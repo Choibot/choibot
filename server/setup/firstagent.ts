@@ -9,6 +9,7 @@
 // Nothing here runs by itself: only start() starts an agent.
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import type { PromptKind } from "../agents/prompt.js";
 import type { AgentRecord } from "../agents/store.js";
 import type { QueueItem } from "../chief/queue/types.js";
 
@@ -58,11 +59,22 @@ export type FirstView = {
     // Claude has not taken it in (the record still keeps the first message, store.ts
     // firstPrompt): its thread has no session, and Claude may wait for an answer on its screen.
     noSession: boolean;
+    // A known dialog of Claude on its screen (a folder question, a login method, a picker): it
+    // waits for the user's answer. The card shows the dialog with the agent pane's own card.
+    dialog?: FirstDialog;
   };
   // The newest pull request ticket of that agent.
   ticket: null | { id: string; state: FirstTicketState };
+  // While the first agent has no ticket that waits: the newest pull request ticket of another
+  // agent (one the user started) that waits. The step "Merge the first PR" merges it on its card.
+  // Null or not there: none.
+  other?: null | { id: string };
   now: number;
 };
+
+// The kinds of dialog the card can show: every known one (agents/prompt.ts), not a screen the
+// console does not know ("unknown": its terminal shows it).
+export type FirstDialog = Exclude<PromptKind, "unknown">;
 
 export type StartResult =
   | { ok: true; view: FirstView }
@@ -82,6 +94,9 @@ export type FirstAgentDeps = {
   spawn: (req: { prompt: string; repo: string; label: string }) => Promise<{ ok: true; id: string } | { ok: false; error: string }>;
   // The tickets of the Queue ([] on a console with no Queue).
   tickets: () => Promise<QueueItem[]>;
+  // The dialog on the agent's screen now, read as the prompt card reads it (agents/prompt-api.ts
+  // readPrompt). Null: none, or no live terminal. Not given: the view has no dialog.
+  dialog?: (id: string) => Promise<PromptKind | null>;
   // A start changed what the checks read.
   changed?: () => void;
   now?: () => number;
@@ -101,6 +116,13 @@ export const ticketState = (i: QueueItem): FirstTicketState =>
 export function ticketOf(items: QueueItem[], agentId: string): QueueItem | null {
   const mine = items.filter((i) => i.kind === "pr" && i.agentId === agentId).sort((a, b) => b.createdAt - a.createdAt);
   return mine.find((i) => ticketState(i) === "open") ?? mine.find((i) => ticketState(i) === "merged") ?? mine[0] ?? null;
+}
+
+// The newest pull request ticket that waits for the user, of an agent that is not `but`. Only a
+// ticket of a GitHub pull request: the Merge of the Queue needs its address.
+export function otherOpen(items: QueueItem[], but: string | null): QueueItem | null {
+  const open = items.filter((i) => i.kind === "pr" && i.agentId !== but && ticketState(i) === "open" && !!i.pr && "url" in i.pr);
+  return open.sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
 }
 
 // The page asks for the view every few seconds. The repos are read from GitHub, so that
@@ -167,19 +189,27 @@ export class FirstAgent {
     const now = (this.d.now ?? Date.now)();
     const kept = await this.kept();
     if (!kept) {
-      const list = await this.repos(now);
-      return { task: FIRST_TASK_TITLE, repo: (await this.usual(list))?.name ?? null, repos: list.map((r) => r.name), agent: null, ticket: null, now };
+      const [list, items] = await Promise.all([this.repos(now), this.d.tickets().catch(() => [] as QueueItem[])]);
+      const other = otherOpen(items, null);
+      return { task: FIRST_TASK_TITLE, repo: (await this.usual(list))?.name ?? null, repos: list.map((r) => r.name), agent: null, ticket: null, other: other && { id: other.id }, now };
     }
     const [rec, items] = await Promise.all([this.d.agents.load(kept.agentId).catch(() => null), this.d.tickets().catch(() => [] as QueueItem[])]);
     const ticket = ticketOf(items, kept.agentId);
+    const other = ticket && ticketState(ticket) === "open" ? null : otherOpen(items, kept.agentId);
+    // Only while the agent is there and no ticket of its pull request is on record.
+    const there = rec && rec.closedAt === undefined && (rec.status === "running" || rec.status === "idle") && !ticket;
+    const kind = there && this.d.dialog ? await this.d.dialog(kept.agentId).catch(() => null) : null;
+    const dialog = kind && kind !== "unknown" ? kind : null;
     return {
       task: FIRST_TASK_TITLE, repo: kept.repo, repos: [],
       agent: {
         id: kept.agentId, name: rec?.label ?? FIRST_AGENT_LABEL, state: agentState(rec), startedAt: kept.startedAt, pullRequest: !!rec?.prUrl || ticket !== null,
         noSession: rec?.firstPrompt !== undefined && now - (rec.firstPromptAt ?? kept.startedAt) >= NO_SESSION_MS,
         ...(rec?.stop && rec.status !== "running" ? { error: rec.stop.text } : {}),
+        ...(dialog ? { dialog } : {}),
       },
       ticket: ticket && { id: ticket.id, state: ticketState(ticket) },
+      other: other && { id: other.id },
       now,
     };
   }

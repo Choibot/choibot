@@ -81,6 +81,9 @@ describe("lastError", () => {
     expect(actionError(agent, view("error"))).toMatch(/stopped with an error/);
     expect(actionError(agent, view("waiting", { pullRequest: true }))).toMatch(/ticket did not come/);
     expect(actionError(agent, view("working", { noSession: true }))).toBe("The first agent has no session yet. Claude may wait for an answer on its terminal screen.");
+    // a known dialog of Claude: its answers are on the step card (with or without a session)
+    expect(actionError(agent, view("working", { noSession: true, dialog: "folder-trust" }))).toBe("Claude asks the first agent a question. Its answers are on the step card.");
+    expect(actionError(agent, view("waiting", { dialog: "login-method" }))).toBe("Claude asks the first agent a question. Its answers are on the step card.");
     expect(actionError(agent, { ...IDLE, first: { task: "t", repo: "shop", repos: ["shop"], now: 9, agent: null, ticket: null } })).toBeNull();
   });
 });

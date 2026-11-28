@@ -193,9 +193,9 @@ describe("onboardedLaunch (a spawn through the helper)", () => {
   const ARGV_PRINTER = "console.log(JSON.stringify(process.argv.slice(1))); process.exit(7)";
   const ARGS = ["--flag", "a prompt with 'quotes', \"double\", $HOME and `ticks`"];
   const NODE_PATH = `${dirname(process.execPath)}:/usr/bin:/bin`;
-  function launch(env: Record<string, string>) {
-    const l = onboardedLaunch(process.execPath, ["-e", ARGV_PRINTER, "--", ...ARGS]);
-    const r = spawnSync(l.command, l.args, { env: env as NodeJS.ProcessEnv, encoding: "utf8" });
+  function launch(env: Record<string, string>, o: { cwd?: string; clone?: string } = {}) {
+    const l = onboardedLaunch(process.execPath, ["-e", ARGV_PRINTER, "--", ...ARGS], o.clone);
+    const r = spawnSync(l.command, l.args, { env: env as NodeJS.ProcessEnv, encoding: "utf8", cwd: o.cwd });
     return { status: r.status, argv: JSON.parse(r.stdout.trim() || "null"), stderr: r.stderr };
   }
   async function dirs() {
@@ -210,8 +210,9 @@ describe("onboardedLaunch (a spawn through the helper)", () => {
     const d = await dirs();
     const l = onboardedLaunch("/opt/claude", ["--x"]);
     expect(l.command).toBe("/bin/sh");
-    expect(l.args.slice(0, 2)).toEqual(["-c", 'node -e "$0" </dev/null >/dev/null 2>&1; exec "$@"']);
-    expect(l.args.slice(-2)).toEqual(["/opt/claude", "--x"]);
+    expect(l.args.slice(0, 2)).toEqual(["-c", 'node -e "$0" -- "$1" </dev/null >/dev/null 2>&1; shift; exec "$@"']);
+    expect(l.args.slice(3)).toEqual(["", "/opt/claude", "--x"]);
+    expect(onboardedLaunch("/opt/claude", ["--x"], "/srv/clones/a1").args.slice(3)).toEqual(["/srv/clones/a1", "/opt/claude", "--x"]);
     const r = launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg });
     expect(r).toEqual({ status: 7, argv: ARGS, stderr: "" });
   });
@@ -233,6 +234,76 @@ describe("onboardedLaunch (a spawn through the helper)", () => {
     expect(await read(d.file)).toEqual({ ...cfg, hasCompletedOnboarding: true });
     expect((await stat(d.file)).mode & 0o777).toBe(0o640);
     expect(await readdir(d.cfg)).toEqual([".claude.json"]);
+  });
+
+  // Strong protection: the helper's repo-clone trusts the clones' folder (its TRUST_JS), but Claude
+  // Code 2.1.332 counts a trusted parent only up to the root of a git repo: in the agent's clone (a
+  // repo root) it asks "Is this a project you created or one you trust?". The launcher trusts the
+  // clone itself, before Claude starts.
+  async function clone(d: { base: string }) {
+    const clones = join(d.base, "agent-homes", "clones");
+    const dir = join(clones, "a1");
+    await mkdir(dir, { recursive: true });
+    return { clones, dir };
+  }
+  const HELPER_ENTRY = { allowedTools: [], mcpContextUris: [], mcpServers: {}, enabledMcpjsonServers: [], disabledMcpjsonServers: [],
+    hasClaudeMdExternalIncludesApproved: false, hasClaudeMdExternalIncludesWarningShown: false, hasTrustDialogAccepted: true };
+
+  it("the agent's own clone under the helper's trusted clones' folder: the clone gets its own trust key, before the command", async () => {
+    const d = await dirs();
+    const c = await clone(d);
+    const cfg = { numStartups: 0, projects: { [c.clones]: HELPER_ENTRY } };
+    await writeFile(d.file, JSON.stringify(cfg));
+    await chmod(d.file, 0o600);
+    const r = launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg }, { cwd: c.dir, clone: c.dir });
+    expect(r).toEqual({ status: 7, argv: ARGS, stderr: "" });
+    expect(await read(d.file)).toEqual({ ...cfg, hasCompletedOnboarding: true, projects: { [c.clones]: HELPER_ENTRY, [c.dir]: HELPER_ENTRY } });
+    expect((await stat(d.file)).mode & 0o777).toBe(0o600);
+    expect(await readdir(d.cfg)).toEqual([".claude.json"]);
+  });
+
+  it("the clone's key keeps the entry's other keys; a key that is true already: no write", async () => {
+    const d = await dirs();
+    const c = await clone(d);
+    await writeFile(d.file, JSON.stringify({ hasCompletedOnboarding: true, projects: { [c.clones]: HELPER_ENTRY, [c.dir]: { allowedTools: ["Bash"], hasTrustDialogAccepted: false } } }));
+    launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg }, { cwd: c.dir, clone: c.dir });
+    expect((await read(d.file)).projects[c.dir]).toEqual({ ...HELPER_ENTRY, allowedTools: ["Bash"] });
+    const before = await stat(d.file);
+    launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg }, { cwd: c.dir, clone: c.dir });
+    expect((await stat(d.file)).mtimeMs).toBe(before.mtimeMs);
+  });
+
+  it("no trust key for a folder that is not the clone the console named, the cwd, or the child of a trusted folder; the mark and the command go on", async () => {
+    const d = await dirs();
+    const c = await clone(d);
+    const other = join(c.clones, "a2");
+    await mkdir(other);
+    const link = join(d.base, "link-to-a1");
+    await symlink(c.dir, link);
+    const cases: { cwd: string; clone?: string; projects: Record<string, unknown> }[] = [
+      { cwd: c.dir, projects: { [c.clones]: HELPER_ENTRY } }, // no folder named (not a clone)
+      { cwd: other, clone: c.dir, projects: { [c.clones]: HELPER_ENTRY } }, // Claude starts in another folder
+      { cwd: c.dir, clone: c.dir, projects: {} }, // the helper's trust of the clones' folder is not there
+      { cwd: c.dir, clone: c.dir, projects: { [c.clones]: { ...HELPER_ENTRY, hasTrustDialogAccepted: false } } },
+      { cwd: c.dir, clone: c.dir, projects: { [join(d.base, "agent-homes")]: HELPER_ENTRY } }, // a grandparent only
+      { cwd: c.dir, clone: join(d.base, "nowhere"), projects: { [c.clones]: HELPER_ENTRY } },
+    ];
+    for (const k of cases) {
+      await writeFile(d.file, JSON.stringify({ projects: k.projects }));
+      expect(launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg }, { cwd: k.cwd, clone: k.clone }).argv).toEqual(ARGS);
+      expect(await read(d.file), JSON.stringify(k)).toEqual({ projects: k.projects, hasCompletedOnboarding: true });
+    }
+    // A link to the clone, named or as the cwd: the key is the real path, as Claude keys it.
+    await writeFile(d.file, JSON.stringify({ projects: { [c.clones]: HELPER_ENTRY } }));
+    launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg }, { cwd: link, clone: link });
+    expect(Object.keys((await read(d.file)).projects)).toEqual([c.clones, c.dir]);
+  });
+
+  it("a fresh config dir with no file and a named clone: only the mark (no trusted parent there)", async () => {
+    const d = await dirs();
+    const c = await clone(d);
+    launch({ HOME: d.home, PATH: NODE_PATH, CLAUDE_CONFIG_DIR: d.cfg }, { cwd: c.dir, clone: c.dir });
+    expect(await read(d.file)).toEqual({ hasCompletedOnboarding: true });
   });
 
   it("no CLAUDE_CONFIG_DIR: $HOME/.claude.json, as Claude reads it", async () => {

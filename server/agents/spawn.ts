@@ -272,7 +272,7 @@ export async function spawnAgent(deps: SpawnDeps, req: SpawnRequest): Promise<Sp
       const args = runtime.buildArgs(preset, { prompt: prompt ?? "", settingsPath, cwd, promptSnapshotOff: chief });
       // persist: host the CLI in a detached dtach session so it survives a restart.
       const bin = runtime.bin();
-      terminals.spawn({ id, cwd, args, command: bin, env, persist: true, helperLaunch: runtime.helperLaunch?.(bin, args) });
+      terminals.spawn({ id, cwd, args, command: bin, env, persist: true, helperLaunch: runtime.helperLaunch?.(bin, args, record) });
     }
   } catch (e) {
     // A failed prepare or spawn must not become a record that boot recovery

@@ -146,6 +146,11 @@ button.head:focus-visible { outline: 1.5px solid var(--ink-2); outline-offset: -
 .ticketFoot > [data-merge] { justify-content: flex-start; }
 .ticketFoot > [role="status"], .ticketFoot > [role="alert"] { text-align: left; }
 .ticketFoot [data-merge] span { text-align: left; }
+/* The merge card: a flex column, so its closed "More" takes no gap (a grid keeps the gap of a
+   track that a negative margin cannot pull up). On a phone, the Queue's Merge takes the set-up's
+   button size, as "Open on GitHub" next to it. */
+.card[data-part="ticket"] { display: flex; flex-direction: column; }
+.wrap[data-phone] .ticketFoot [data-merge] button { height: 36px; font-size: 16px; }
 
 /* The "done" screen: one calm line, then the cards of what comes next. */
 .hero { display: grid; justify-items: start; gap: 8px; padding: 6px 0 4px; }

@@ -92,7 +92,8 @@ export type OneStepCard =
   | ({ kind: "connect" } & OneStepPress)
   | ({ kind: "approve" } & OneStepPress)
   | { kind: "failed"; line: string };
-export const ONE_STEP_ACCESS = "ChoiBot gets access only to the repos that you pick next.";
+// The approval and the choice of repos are one trip to GitHub (src/lib/githubTrip.ts).
+export const ONE_STEP_ACCESS = "On GitHub you approve, then pick your repos. ChoiBot gets access only to those.";
 export function oneStepCard(login: LoginView | null, pressed: boolean): OneStepCard {
   if (!login || login.state === "idle" || login.state === "starting") return { kind: "starting", line: "Asking GitHub for a code…" };
   if (login.state === "done") return { kind: "approved", line: "Approved on GitHub. One moment…" };
@@ -100,7 +101,7 @@ export function oneStepCard(login: LoginView | null, pressed: boolean): OneStepC
   if (login.state !== "waiting") return { kind: "starting", line: "Asking GitHub for a code…" };
   const href = deviceLink(login.url, login.code);
   return pressed
-    ? { kind: "approve", code: login.code, href, line: "Approve ChoiBot on GitHub. If it asks for the code, paste it.", button: "Open GitHub again" }
+    ? { kind: "approve", code: login.code, href, line: "Approve ChoiBot on GitHub, then pick your repos there. If it asks for the code, paste it.", button: "Open GitHub again" }
     : { kind: "connect", code: login.code, href, line: ONE_STEP_ACCESS, button: "Connect GitHub" };
 }
 
@@ -214,6 +215,9 @@ export function firstSay(v: FirstView): FirstSay {
   if (v.ticket?.state === "open") return { tone: "ok", line: "The pull request is open. Its ticket is in the next step.", acts: [] };
   if (v.ticket?.state === "merged") return { tone: "ok", line: "The pull request is merged.", acts: [] };
   if (v.ticket) return { tone: "warn", line: "The pull request was closed and not merged. Start the task again.", acts: ["again"] };
+  // Claude asks a question (its folder question, a login method): the card shows it with its
+  // answers (the agent pane's own card), so no other act.
+  if (a.dialog && (a.state === "working" || a.state === "waiting")) return { tone: "warn", line: "Waiting for you", acts: [] };
   if (a.noSession && (a.state === "working" || a.state === "waiting")) {
     return { tone: "warn", line: "No session started yet.", hint: "Its terminal shows what Claude waits for.", acts: ["terminal"] };
   }
@@ -240,13 +244,19 @@ export function firstSay(v: FirstView): FirstSay {
   }
 }
 
-// What stands in the way of a merge, from the facts on the ticket, and what to do. Null:
-// nothing known (the Merge button reads GitHub again when it is pressed).
-export function mergeHint(i: Pick<QueueItem, "pr">): string | null {
+// The checks of the pull request in one short line, from the facts on the ticket. Merge stays
+// as in the Queue: checks that fail or still run ask first in its confirm, and conflicts turn
+// it off (its own line says so, so this line says nothing then). Null: no GitHub pull request on
+// the ticket, or no word of its checks yet.
+export type ChecksLine = { text: string; tone?: "good" | "bad" | "warn" };
+export function checksLine(i: Pick<QueueItem, "pr">): ChecksLine | null {
   const pr = i.pr && "url" in i.pr ? i.pr : null;
-  if (!pr) return null;
-  if (pr.mergeable === "CONFLICTING") return "The pull request has conflicts with the main branch. Open it on GitHub to see them.";
-  if (pr.checks === "failure") return "A check of the pull request fails. Open it on GitHub to see why. Merge asks you first.";
-  if (pr.checks === "pending") return "The checks of the pull request still run. You can wait, or merge now: Merge asks you first.";
-  return null;
+  if (!pr || pr.mergeable === "CONFLICTING") return null;
+  switch (pr.checks) {
+    case "success": return { text: "Checks pass.", tone: "good" };
+    case "failure": return { text: "A check fails. Merge asks you first.", tone: "bad" };
+    case "pending": return { text: "Checks still run. Merge asks you first.", tone: "warn" };
+    case "none": return { text: "No checks." };
+    default: return null;
+  }
 }

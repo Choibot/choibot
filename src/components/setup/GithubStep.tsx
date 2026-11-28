@@ -4,9 +4,12 @@
 // state of the login, and the check of the step list decides (onDone reads the list again).
 // No password and no token is typed here or passes through this page. With the GitHub app switch
 // on (the view has `app`), the login is the ChoiBot app's, with the same code. One action: the
-// person chooses the app's repos in the next step, "Pick a repo" (RepoStep).
+// person chooses the app's repos in the next step, "Pick a repo" (RepoStep). In Set-up the two are
+// ONE trip to GitHub (src/lib/githubTrip.ts): press 1 opens the tab that later goes on to the
+// app's install page.
 "use client";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type MouseEvent } from "react";
+import { onReturn, openTrip } from "../../lib/githubTrip";
 import {
   appApproveLine, appReachLine, oneStepCard, fetchCommitName, fetchLogin, loginProblem, minutesLeft, needsCommitName, saveCommitName, startLogin,
   type CommitNameView, type LoginView,
@@ -92,9 +95,10 @@ function AutoCommitName({ onDone }: { onDone: () => Promise<void> }) {
 }
 
 // The one card "Connect GitHub" of the ChoiBot app in Set-up (oneStepCard has its words). Press 1
-// is a link: it opens GitHub's device page with the code in it, and copies the code.
+// is a link: it opens GitHub's device page with the code in it (the tab of the one trip), and
+// copies the code.
 function OneStepCard({ view, pressed, onPress, onFresh, busy }: {
-  view: LoginView | null; pressed: boolean; onPress: (code: string) => void; onFresh: () => void; busy: boolean;
+  view: LoginView | null; pressed: boolean; onPress: (e: MouseEvent<HTMLAnchorElement>, code: string, href: string) => void; onFresh: () => void; busy: boolean;
 }) {
   const card = oneStepCard(view, pressed);
   if (card.kind === "starting" || card.kind === "approved") return <p className={c.today}>{card.line}</p>;
@@ -114,7 +118,7 @@ function OneStepCard({ view, pressed, onPress, onFresh, busy }: {
       </div>
       <p className={c.today}>{card.line}</p>
       <div className={c.acts}>
-        <a className={`${k.btn} ${k.primary}`} href={card.href} target="_blank" rel="noopener noreferrer" onClick={() => onPress(card.code)}>{card.button}<ExternalIcon /></a>
+        <a className={`${k.btn} ${k.primary}`} href={card.href} target="_blank" rel="noopener noreferrer" onClick={(e) => onPress(e, card.code, card.href)}>{card.button}<ExternalIcon /></a>
         {card.kind === "approve" && <button type="button" className={`${k.btn} ${k.quiet}`} disabled={busy} onClick={onFresh}>New code</button>}
       </div>
     </div>
@@ -152,8 +156,12 @@ export function GithubStep({ row, onDone, place = "setup" }: { row: SetupRow; on
   const waits = view?.state === "starting" || view?.state === "waiting";
   useEffect(() => {
     if (named || !waits) return;
-    const tick = setInterval(() => { void fetchLogin().then(take, () => {}); }, POLL_MS);
-    return () => clearInterval(tick);
+    const read = () => { void fetchLogin().then(take, () => {}); };
+    const tick = setInterval(read, POLL_MS);
+    // Back from GitHub: the state at once, not at the next tick (a phone stops the ticks of a
+    // tab that is out of sight).
+    const stop = onReturn(read);
+    return () => { clearInterval(tick); stop(); };
   }, [named, waits, take]);
 
   const start = async (fresh: boolean) => {
@@ -169,9 +177,13 @@ export function GithubStep({ row, onDone, place = "setup" }: { row: SetupRow; on
     void start(false);
   }, [oneStep, named, view]);
 
-  const press = (code: string) => {
+  // A plain press opens the tab of the one trip; a press with a key or another button (a new
+  // window, a new tab in the back) is the link's own, as before.
+  const press = (e: MouseEvent<HTMLAnchorElement>, code: string, href: string) => {
     setPressed(true);
     try { void navigator.clipboard?.writeText(code).catch(() => {}); } catch { /* the code is on the card */ }
+    if (e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
+    if (openTrip(href)) e.preventDefault();
   };
 
   if (named) return oneStep ? <AutoCommitName onDone={onDone} /> : <CommitName onDone={onDone} />;

@@ -17,6 +17,11 @@
 // (the first-start file sets it, default 24 hours); 10 wrong tries end it; the compare is of two
 // hashes of equal length, in constant time; no part of the secret or of its hash goes into a log
 // line or an answer. The lock (firstrun.ts) refuses a claim with an agent header.
+//
+// A new link (relink): the owner's dashboard makes a new secret in the browser, and the door (the
+// front proxy of a hosted console) sends its hash and an end time to the route of firstrun.ts.
+// The new claim replaces the claim before it (that link stops at once; the tries start at 0). A
+// console that had a paired device once is "used" for ever: no new link opens it again.
 import { createHash, timingSafeEqual } from "node:crypto";
 import { lstat, readFile, rm } from "node:fs/promises";
 import { atomicWrite, onChain, readJson } from "./files.js";
@@ -34,6 +39,24 @@ const SHA256_HEX_RE = /^[0-9a-f]{64}$/;
 const SERVER_ID_RE = /^[a-z0-9]{1,40}$/;
 
 const sha256 = (s: string): Buffer => createHash("sha256").update(s, "utf8").digest();
+
+// The longest life of a new link from the door.
+export const RELINK_MAX_LIFE_MS = CLAIM_LIFE_MS;
+
+// The body of the door's new link: exactly {sha256, expiresAt}. The reason of a refusal names a
+// field, never a value of it.
+export type RelinkBody = { sha256: string; expiresAt: number };
+export function parseRelink(raw: unknown, now: number): RelinkBody | { refused: string } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { refused: "body" };
+  const o = raw as Record<string, unknown>;
+  const keys = Object.keys(o).sort();
+  if (keys.length !== 2 || keys[0] !== "expiresAt" || keys[1] !== "sha256") return { refused: "keys" };
+  if (typeof o.sha256 !== "string" || !SHA256_HEX_RE.test(o.sha256)) return { refused: "sha256" };
+  const end = o.expiresAt;
+  if (typeof end !== "number" || !Number.isSafeInteger(end) || end <= now) return { refused: "expiresAt" };
+  if (end > now + RELINK_MAX_LIFE_MS) return { refused: "expiresAt is more than 24 hours away" };
+  return { sha256: o.sha256, expiresAt: end };
+}
 
 // ------------------------------------------------------------ the first-start file
 
@@ -84,6 +107,10 @@ function asState(raw: unknown): State | null {
 }
 
 const isOpen = (s: State | null): s is Open => s !== null && "sha256" in s;
+const isUsed = (s: State | null): boolean => s !== null && "ended" in s && s.ended === "used";
+// Was a device paired on this console once (the state file says "used")? For the first-start
+// command (bin/lib/firststart.ts), which runs while the console is stopped.
+export const claimUsed = async (stateFile: string): Promise<boolean> => isUsed(asState(await readJson<unknown>(stateFile)));
 
 // none: this console never had a claim link. open: a link works now. ended: the link of this
 // console was used, is too old, or took too many wrong tries.
@@ -92,6 +119,8 @@ export type LinkView = { link: LinkState; hosted: boolean };
 // As the code of the box (firstrun.ts ClaimResult): ok (and the claim is gone now), wrong (a try
 // is counted), spent (the last wrong try), gone (no claim that works).
 export type LinkClaim = "ok" | "wrong" | "spent" | "gone";
+// ok: the new claim is the one claim now. claimed: a device was paired on this console once.
+export type LinkRelink = "ok" | "claimed";
 
 export type ClaimLinkFiles = { firstStart: string; state: string };
 
@@ -138,14 +167,39 @@ export class ClaimLinks {
     });
   }
 
-  // A device is paired (in any way): the claim ends, and a first-start file that waits is removed
-  // unread (a new link is only for a console with no paired device).
+  // The door's new link (firstrun.ts checks who sends it and its shape): it replaces the claim
+  // before it, whatever that one's state, with no try counted, unless a device was paired on
+  // this console once. A first-start file that waits is taken first, so it cannot replace the new
+  // claim later. One log line, with the end time and no hash.
+  relink(next: RelinkBody): Promise<LinkRelink> {
+    return onChain(this.files.state, async () => {
+      await this.intake();
+      if (isUsed(asState(await readJson<unknown>(this.files.state)))) return "claimed";
+      await atomicWrite(this.files.state, JSON.stringify({ sha256: next.sha256, expiresAt: next.expiresAt, tries: 0, hosted: true } satisfies Open));
+      this.open = true;
+      this.log(`[chief] claim link: a new link from the door; it works until ${new Date(next.expiresAt).toISOString()}`);
+      return "ok";
+    });
+  }
+
+  // For the door's read (firstrun.ts): was a device paired on this console once? Then no new
+  // link is ever taken (relink answers "claimed").
+  claimedOnce(): Promise<boolean> {
+    return onChain(this.files.state, async () => {
+      await this.intake();
+      return isUsed(asState(await readJson<unknown>(this.files.state)));
+    });
+  }
+
+  // A device is paired (in any way): the claim ends as "used", whatever its state was (open, too
+  // old, too many tries, or none), so no new link opens this console again. A first-start file
+  // that waits is removed unread (a new link is only for a console with no paired device).
   mayBeOpen(): boolean { return this.open; }
   end(): Promise<void> {
     return onChain(this.files.state, async () => {
       await rm(this.files.firstStart, { force: true });
       const s = asState(await readJson<unknown>(this.files.state));
-      if (isOpen(s)) await this.closeAs(s, "used");
+      if (!isUsed(s)) await atomicWrite(this.files.state, JSON.stringify({ ended: "used", hosted: s?.hosted === true } satisfies Ended));
       this.open = false;
     });
   }
@@ -165,10 +219,16 @@ export class ClaimLinks {
   }
 
   // Read the first-start file once, keep its claim (it replaces the one before), remove the file.
-  // A refused file is removed too: it cannot work later, and the reason goes to the log.
+  // A refused file is removed too: it cannot work later, and the reason goes to the log. After a
+  // pairing (state "used") a file is removed unread: it never opens this console again.
   private async intake(): Promise<void> {
     let st;
     try { st = await lstat(this.files.firstStart); } catch { return; }
+    if (isUsed(asState(await readJson<unknown>(this.files.state)))) {
+      await rm(this.files.firstStart, { force: true });
+      this.log("[chief] first-start file refused (a device was paired on this console once); it is removed");
+      return;
+    }
     let text: string | null = null;
     if (st.isFile() && st.size <= FIRST_START_MAX_BYTES) {
       try { text = await readFile(this.files.firstStart, "utf8"); } catch { text = null; }

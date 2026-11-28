@@ -77,6 +77,23 @@ describe("first-start (as the console's user)", () => {
     expect(existsSync(join(chief, "first-start.json"))).toBe(false);
   });
 
+  it("refuses a console where a device was paired once (all devices revoked since): the claim state stays, nothing changes", async () => {
+    const before = readFileSync(join(dir, ".env"), "utf8");
+    mkdirSync(chief, { recursive: true });
+    const used = JSON.stringify({ ended: "used", hosted: true });
+    writeFileSync(join(chief, "claim-link.json"), used, { mode: 0o600 });
+    writeFileSync(join(chief, "user-devices.json"), "[]");
+    const r = await run();
+    expect([r.code, r.err]).toEqual([1, "✖ A device was paired on this ChoiBot once: this is not its first start. Nothing is changed."]);
+    expect(readFileSync(join(chief, "claim-link.json"), "utf8")).toBe(used);
+    expect(readFileSync(join(dir, ".env"), "utf8")).toBe(before);
+    expect(existsSync(join(chief, "first-start.json"))).toBe(false);
+    // An ended link that was never used (too old, too many tries) is no pairing: the first start goes on.
+    writeFileSync(join(chief, "claim-link.json"), JSON.stringify({ ended: "expired", hosted: true }));
+    expect((await run()).code).toBe(0);
+    expect(existsSync(join(chief, "claim-link.json"))).toBe(false);
+  });
+
   it("refuses a file that the console would refuse, and a url of another shape, naming the field only", async () => {
     const before = readFileSync(join(dir, ".env"), "utf8");
     for (const [text, why] of [

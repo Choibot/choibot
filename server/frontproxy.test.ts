@@ -3,11 +3,11 @@
 // before any handler, and no USER right from the proxy alone.
 import websocket from "@fastify/websocket";
 import Fastify, { type FastifyInstance } from "fastify";
-import { createHash } from "node:crypto";
+import { createHash, createHmac, randomBytes } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync, chmodSync } from "node:fs";
-import type { IncomingMessage, ServerResponse } from "node:http";
+import { createServer as createHttpServer, request as httpRequest, type IncomingMessage, type ServerResponse } from "node:http";
 import { request as httpsRequest } from "node:https";
-import { connect as netConnect, type Socket } from "node:net";
+import { connect as netConnect, type AddressInfo, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
@@ -18,12 +18,12 @@ import { makeProxyTls } from "../bin/lib/firststart.js";
 import { registerAuth } from "./auth.js";
 import { DeviceStore } from "./chief/auth.js";
 import { ClaimLinks } from "./chief/claimlink.js";
-import { BoxCodes, registerFirstRun } from "./chief/firstrun.js";
+import { BoxCodes, DOOR_OP_HEADER, DOOR_PROOF_HEADER, RELINK_PROOF, RELINK_ROUTE, registerFirstRun } from "./chief/firstrun.js";
 import { gateMerge, gateUser, makeGate } from "./chief/gate.js";
 import { registerStrongAccess } from "./chief/access.js";
 import { VERSION_HEADER, registerVersionHeader } from "./release.js";
 import {
-  PROXY_TOKEN_HEADER, allowedWithoutDevice, hostInRange, inRange, installProxyGate, isTrustedProxyRequest, listenProxy, localAddressIn,
+  PROXY_TOKEN_HEADER, allowedWithoutDevice, doorProof, hostInRange, inRange, installProxyGate, isTrustedProxyRequest, listenProxy, localAddressIn,
   parseProxySettings, privateRange, readProxySettings, registerDeviceGate, registerProxyHeaderStrip, devListenerRefusal, stripProxyHeader, type ProxyListener,
 } from "./frontproxy.js";
 import { wsUserOk } from "./chief/wsgate.js";
@@ -53,10 +53,10 @@ type World = { app: FastifyInstance; proxy: ProxyListener; devices: DeviceStore;
 // A console with the walls of the real one: the proxy gate on the HTTP server, the origin guard,
 // the first-run lock (optional), the outer gate, and routes guarded as Deploy/Settings (gateUser)
 // and Merge (gateMerge) are.
-async function world(o: { lock?: boolean; strong?: boolean } = {}): Promise<World> {
+async function world(o: { lock?: boolean; strong?: boolean; token?: string } = {}): Promise<World> {
   const d = mkdtempSync(join(dir, "w-"));
   const app = Fastify();
-  installProxyGate(app.server, HASH);
+  installProxyGate(app.server, o.token === undefined ? HASH : createHash("sha256").update(o.token, "utf8").digest("hex"));
   registerProxyHeaderStrip(app);
   registerVersionHeader(app, { version: 849, commit: "b".repeat(40) });
   await app.register(websocket);
@@ -108,7 +108,7 @@ function call(w: World, o: { path: string; method?: string; token?: string | nul
   return new Promise((resolve) => {
     const headers: Record<string, string> = { host: "s1.example", ...(o.headers ?? {}) };
     if (o.token !== null) headers[PROXY_TOKEN_HEADER] = o.token ?? TOKEN;
-    if (o.body !== undefined) headers["content-type"] = "application/json";
+    if (o.body !== undefined && headers["content-type"] === undefined) headers["content-type"] = "application/json";
     const req = httpsRequest({ host: ADDRESS, port: w.proxy.port, localAddress: o.from ?? FROM, path: o.path, method: o.method ?? "GET", headers, rejectUnauthorized: false, agent: false }, (res) => {
       let body = "";
       res.setEncoding("utf8");
@@ -439,6 +439,168 @@ describe("no USER right from the proxy alone", () => {
     const device = await w.devices.add("laptop");
     const a = ok(await call(w, { path: "/api/user-only", method: "POST", body: "{}", headers: { origin: "https://s2.example", "x-choibot-user": device } }));
     expect(a.status).toBe(403);
+  });
+});
+
+// A door of before the proof (the edge's door today): it passes a browser's request to the
+// private listener with its token, removes Cookie, and passes every other header on (the door op
+// and a proof too) for any path.
+async function oldDoor(w: World): Promise<string> {
+  const server = createHttpServer((req, res) => {
+    const headers: Record<string, string | string[] | undefined> = { ...req.headers, host: "s1.example", [PROXY_TOKEN_HEADER]: TOKEN };
+    delete headers.cookie;
+    delete headers.connection;
+    const up = httpsRequest({ host: ADDRESS, port: w.proxy.port, localAddress: FROM, path: req.url, method: req.method, headers, rejectUnauthorized: false, agent: false }, (r) => {
+      res.writeHead(r.statusCode ?? 502, r.headers);
+      r.pipe(res);
+    });
+    up.on("error", () => { res.writeHead(502); res.end(); });
+    req.pipe(up);
+  });
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  closers.push(() => new Promise((r) => server.close(r)));
+  return `127.0.0.1:${(server.address() as AddressInfo).port}`;
+}
+// A plain HTTP request as curl makes it: no header but these (fetch adds Sec-Fetch-Mode).
+function plain(hostPort: string, o: { path: string; method?: string; headers?: Record<string, string>; body?: string }): Promise<{ status: number; body: string }> {
+  const [host, port] = hostPort.split(":");
+  return new Promise((resolve, reject) => {
+    const req = httpRequest({ host, port: Number(port), path: o.path, method: o.method ?? "GET", headers: o.headers ?? {}, agent: false }, (res) => {
+      let body = "";
+      res.setEncoding("utf8");
+      res.on("data", (c: string) => { body += c; });
+      res.on("end", () => resolve({ status: res.statusCode ?? 0, body }));
+    });
+    req.on("error", reject);
+    req.end(o.body);
+  });
+}
+
+describe("the door's new claim link (relink)", () => {
+  const DOOR = { [DOOR_OP_HEADER]: "relink" };
+  const READ_PROOF = { [DOOR_PROOF_HEADER]: doorProof(TOKEN, RELINK_PROOF.read) };
+  const newBody = () => {
+    const secret = randomBytes(32).toString("base64url");
+    const link = { sha256: createHash("sha256").update(secret, "utf8").digest("hex"), expiresAt: Date.now() + 3_600_000 };
+    return { secret, link, body: JSON.stringify(link), proof: { [DOOR_PROOF_HEADER]: doorProof(TOKEN, RELINK_PROOF.make(link)) } };
+  };
+
+  it("a browser's request through an OLD door (the door op passed on, the token added) is refused by the real console, whatever proof it makes up", async () => {
+    const w = await world({ lock: true, strong: true });
+    const door = await oldDoor(w);
+    const { link, body } = newBody();
+    // Someone with the owner's door session (no passkey) sends what the door's control path sends.
+    const attack = (proof: Record<string, string>) =>
+      plain(door, { path: RELINK_ROUTE, method: "POST", body, headers: { "content-type": "application/json", cookie: "door_session=stolen", ...DOOR, ...proof } });
+    const madeUp: Record<string, string>[] = [
+      {}, { [DOOR_PROOF_HEADER]: "0".repeat(64) }, { [DOOR_PROOF_HEADER]: doorProof("u".repeat(43), RELINK_PROOF.make(link)) },
+      { [DOOR_PROOF_HEADER]: createHash("sha256").update(RELINK_PROOF.make(link), "utf8").digest("hex") },
+    ];
+    for (const proof of madeUp) {
+      const r = await attack(proof);
+      expect([r.status, JSON.parse(r.body)]).toEqual([403, { error: "door-only" }]);
+    }
+    const read = await plain(door, { path: RELINK_ROUTE, headers: DOOR });
+    expect([read.status, JSON.parse(read.body)]).toEqual([403, { error: "door-only" }]);
+    // The console is as it was: the door's own read says not claimed, and its own call works.
+    const r0 = ok(await call(w, { path: RELINK_ROUTE, headers: { ...DOOR, ...READ_PROOF } }));
+    expect([r0.status, JSON.parse(r0.body)]).toEqual([200, { claimed: false }]);
+  });
+
+  it("refuses the door's call with a missing, wrong or replayed proof over the real listener", async () => {
+    const w = await world({ lock: true, strong: true });
+    const a = newBody();
+    const b = newBody();
+    for (const proof of [{}, { [DOOR_PROOF_HEADER]: "0".repeat(64) }, b.proof, READ_PROOF]) {
+      const r = ok(await call(w, { path: RELINK_ROUTE, method: "POST", body: a.body, headers: { ...DOOR, ...proof } }));
+      expect([r.status, JSON.parse(r.body)]).toEqual([403, { error: "door-only" }]);
+    }
+    for (const proof of [{}, a.proof]) {
+      const r = ok(await call(w, { path: RELINK_ROUTE, headers: { ...DOOR, ...proof } }));
+      expect([r.status, JSON.parse(r.body)]).toEqual([403, { error: "door-only" }]);
+    }
+    // The proof of a, sent again with a: the same link, so the same answer as the first time.
+    expect(ok(await call(w, { path: RELINK_ROUTE, method: "POST", body: a.body, headers: { ...DOOR, ...a.proof } })).status).toBe(200);
+  });
+
+  it("checks the proof before the shape over the real listener: with no right proof, the same 403 whatever the body", async () => {
+    const w = await world({ lock: true, strong: true });
+    const a = newBody();
+    const tries: { body: string; headers?: Record<string, string> }[] = [
+      { body: JSON.stringify({ ...a.link, sha256: "x" }) }, { body: JSON.stringify({ ...a.link, more: 1 }) }, { body: JSON.stringify("x") },
+      { body: "{" }, { body: a.body, headers: { "content-type": "text/plain" } }, { body: JSON.stringify({ ...a.link, pad: "x".repeat(2_000_000) }) },
+    ];
+    for (const t of tries) {
+      const r = ok(await call(w, { path: RELINK_ROUTE, method: "POST", body: t.body, headers: { ...DOOR, ...t.headers } }));
+      expect([r.status, JSON.parse(r.body)]).toEqual([403, { error: "door-only" }]);
+    }
+    // A bad shape with the door's proof of it: the field.
+    const far = { ...a.link, expiresAt: Date.now() + 2 * 86_400_000 };
+    const bad = ok(await call(w, { path: RELINK_ROUTE, method: "POST", body: JSON.stringify(far), headers: { ...DOOR, [DOOR_PROOF_HEADER]: doorProof(TOKEN, RELINK_PROOF.make(far)) } }));
+    expect([bad.status, JSON.parse(bad.body)]).toEqual([400, { error: "bad-relink", field: "expiresAt is more than 24 hours away" }]);
+    expect(ok(await call(w, { path: RELINK_ROUTE, method: "POST", body: a.body, headers: { ...DOOR, ...a.proof } })).status).toBe(200);
+  });
+
+  it("refuses every proof when the door's token is longer than 64 bytes (the gate takes up to 128 characters)", async () => {
+    const long = "L".repeat(100);
+    const w = await world({ lock: true, strong: true, token: long });
+    const { link, body } = newBody();
+    // The key of HMAC-SHA256 for a key of more than 64 bytes: the token's SHA-256 (CONSOLE_PROXY_TOKEN_SHA256).
+    const hmac = (key: string | Buffer, m: string) => ({ [DOOR_PROOF_HEADER]: createHmac("sha256", key).update(m, "utf8").digest("hex") });
+    for (const key of [long, createHash("sha256").update(long, "utf8").digest()]) {
+      // JSON: the route's answer, so the gate took the long token.
+      const post = ok(await call(w, { path: RELINK_ROUTE, method: "POST", body, token: long, headers: { ...DOOR, ...hmac(key, RELINK_PROOF.make(link)) } }));
+      expect([post.status, JSON.parse(post.body)]).toEqual([403, { error: "door-only" }]);
+      const read = ok(await call(w, { path: RELINK_ROUTE, token: long, headers: { ...DOOR, ...hmac(key, RELINK_PROOF.read) } }));
+      expect([read.status, JSON.parse(read.body)]).toEqual([403, { error: "door-only" }]);
+    }
+  });
+
+  it("on loopback: the same 404 before the body is read (a wrong content type, a broken body, a proof)", async () => {
+    const w = await world({ lock: true, strong: true });
+    const { body, proof } = newBody();
+    const at = `127.0.0.1:${w.loopbackPort}`;
+    const tries: { headers: Record<string, string>; body?: string; method?: string }[] = [
+      { headers: { "content-type": "text/plain", ...DOOR }, body },
+      { headers: { "content-type": "application/json", ...DOOR }, body: "{" },
+      { headers: { "content-type": "application/json", ...DOOR, ...proof }, body },
+      { headers: { "content-type": "application/json" }, body: "x".repeat(2_000_000) },
+      { headers: { ...DOOR, ...READ_PROOF }, method: "GET" },
+    ];
+    for (const t of tries) {
+      const r = await plain(at, { path: RELINK_ROUTE, method: t.method ?? "POST", headers: t.headers, body: t.body });
+      expect([r.status, JSON.parse(r.body)]).toEqual([404, { error: "not found" }]);
+    }
+  });
+
+  it("only over the private listener with the door's token, on a locked console, with strong protection on", async () => {
+    const w = await world({ lock: true, strong: true });
+    const { secret, body, proof } = newBody();
+    const send = (o: { token?: string | null; headers?: Record<string, string> } = {}) =>
+      call(w, { path: RELINK_ROUTE, method: "POST", body, token: o.token, headers: o.headers ?? { ...DOOR, ...proof } });
+    // No token, or a wrong one: the gate's 403 before any hook.
+    for (const token of [null, "u".repeat(43)]) expect([ok(await send({ token })).status, ok(await send({ token })).body]).toEqual([403, "Forbidden"]);
+    // The main listener (loopback, a true local peer): as if there were no such route.
+    const local = await fetch(`http://127.0.0.1:${w.loopbackPort}${RELINK_ROUTE}`, { method: "POST", headers: { "content-type": "application/json", ...DOOR }, body });
+    expect([local.status, await local.json()]).toEqual([404, { error: "not found" }]);
+    // A browser's request that came through the door: refused.
+    const browser = ok(await send({ headers: { ...DOOR, ...proof, origin: "https://s1.example", "sec-fetch-mode": "cors" } }));
+    expect([browser.status, JSON.parse(browser.body)]).toEqual([403, { error: "door-only" }]);
+    // The door's read before it offers the action: not claimed.
+    const read = () => call(w, { path: RELINK_ROUTE, headers: { ...DOOR, ...READ_PROOF } });
+    const r0 = ok(await read());
+    expect([r0.status, JSON.parse(r0.body)]).toEqual([200, { claimed: false }]);
+    // The door's own request: the new link is in place, and it pairs the first device through the door.
+    const made = ok(await send());
+    expect([made.status, JSON.parse(made.body).ok]).toEqual([200, true]);
+    const paired = ok(await call(w, { path: "/api/chief/pair/first", method: "POST", body: JSON.stringify({ claim: secret }), headers: { origin: "https://s1.example" } }));
+    expect(paired.status).toBe(200);
+    // Claimed: no new link any more.
+    const again = ok(await send());
+    expect([again.status, JSON.parse(again.body)]).toEqual([409, { error: "claimed" }]);
+    // The door's read with no device proof (the device gate lets it pass, as the POST): claimed.
+    const r1 = ok(await read());
+    expect([r1.status, JSON.parse(r1.body)]).toEqual([200, { claimed: true }]);
   });
 });
 

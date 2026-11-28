@@ -36,9 +36,10 @@ export function watchFirst(f: () => void): () => void {
 }
 export const lastFirst = (): FirstView | null => firstMemory.get(FIRST) ?? null;
 
-// The merge step shows the ticket of the pull request: a view with no ticket is older than the
-// state that opened the step, and would draw the wrong branch for a moment.
-export const hasTicket = (v: FirstView): boolean => v.ticket !== null;
+// The merge step shows the ticket of the pull request (the first agent's, or another agent's that
+// waits): a view with neither is older than the state that opened the step, and would draw the
+// wrong branch for a moment.
+export const hasTicket = (v: FirstView): boolean => v.ticket !== null || !!v.other;
 
 const reading = new Set<string>();
 /** Read a ticket before its part opens: once per id, while no copy is in memory. */

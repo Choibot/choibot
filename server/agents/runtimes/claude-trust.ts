@@ -4,8 +4,10 @@
 // - trustClaudeDir: projects["<real path>"].hasTrustDialogAccepted, also read for each parent
 //   dir, or Claude asks "Is this a project you created or one you trust?" and Enter picks
 //   "No, exit". Claude Code has no CLI flag or setting that skips it in interactive mode (the
-//   help text: only -p or a non-TTY stdout skips it). Workers never see the dialog: their
-//   worktrees sit under the already-trusted workspace dir. A lead's home does not.
+//   help text: only -p or a non-TTY stdout skips it). A trusted parent counts only up to the
+//   root of a git repo (Claude Code 2.1.332): in a repo root, only its own key counts. A worker
+//   of an own install answers the dialog in its pane (the folder is the user's). A lead's home is
+//   marked; an agent's own clone too (strong protection, ONBOARD_JS below).
 import { closeSync, existsSync, fchmodSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeSync } from "node:fs";
 import { randomBytes } from "node:crypto";
 import { basename, dirname, join, resolve } from "node:path";
@@ -74,12 +76,34 @@ export function markOnboarded(configFile: string, configDir: string, warn: (s: s
 // After each write it reads the file again: a writer that read it before (the helper's trust of a
 // repo, with no check before its rename) can put its copy, with no key, over the new one; the key
 // is then set once more. The temp file gets its name only when this script made it.
+// The agent's own clone (argv[1], named by the console: AGENT_HOME_ROOT/clones/<id>; else ""): the
+// helper's repo-clone trusts the clones' folder, but the clone is a git repo root, where Claude
+// counts no trusted parent (claude 2.1.332 asks its folder question there). So the clone gets its
+// own key: projects["<real path of the clone>"], with the fields of a new entry. Only when the
+// clone is the folder Claude starts in (its real path is the cwd), and only when its parent folder
+// is trusted in the same file already (the helper's key): never a folder that the helper does not
+// trust, never a folder that only the caller names.
 // Every failure is silent: Claude then starts as before (its theme picker, shown in its terminal).
 export const ONBOARD_JS = `
 const fs = require("fs"), path = require("path"), os = require("os"), crypto = require("crypto");
 const dir = process.env.CLAUDE_CONFIG_DIR || "";
 const file = dir ? path.join(dir, ".claude.json") : path.join(os.homedir(), ".claude.json");
 const legacy = path.join(dir || path.join(os.homedir(), ".claude"), ".config.json");
+let clone = "";
+try { const c = process.argv[1] || ""; if (c && fs.realpathSync(c) === fs.realpathSync(process.cwd())) clone = fs.realpathSync(c); } catch {}
+const isObj = (v) => typeof v === "object" && v !== null && !Array.isArray(v);
+const trusted = (j, k) => isObj(j.projects) && isObj(j.projects[k]) && j.projects[k].hasTrustDialogAccepted === true;
+const change = (j) => {
+  let changed = false;
+  if (j.hasCompletedOnboarding !== true) { j.hasCompletedOnboarding = true; changed = true; }
+  if (clone && trusted(j, path.dirname(clone)) && !trusted(j, clone)) {
+    const cur = isObj(j.projects[clone]) ? j.projects[clone] : {};
+    j.projects[clone] = { allowedTools: [], mcpContextUris: [], mcpServers: {}, enabledMcpjsonServers: [], disabledMcpjsonServers: [],
+      hasClaudeMdExternalIncludesApproved: false, hasClaudeMdExternalIncludesWarningShown: false, ...cur, hasTrustDialogAccepted: true };
+    changed = true;
+  }
+  return changed;
+};
 let tmp = "";
 try {
   for (let i = 0; i < 5; i++) {
@@ -92,8 +116,7 @@ try {
     const before = fs.statSync(target);
     if (!before.isFile()) break;
     const j = JSON.parse(fs.readFileSync(target, "utf8"));
-    if (typeof j !== "object" || j === null || Array.isArray(j) || j.hasCompletedOnboarding === true) break;
-    j.hasCompletedOnboarding = true;
+    if (!isObj(j) || !change(j)) break;
     const t = path.join(path.dirname(target), "." + path.basename(target) + ".onboard-" + process.pid + "-" + crypto.randomBytes(4).toString("hex") + ".tmp");
     fs.writeFileSync(t, JSON.stringify(j, null, 2), { flag: "wx", mode: before.mode & 0o777 });
     tmp = t;
@@ -106,10 +129,11 @@ try {
 } catch { if (tmp) { try { fs.unlinkSync(tmp); } catch {} } }
 `;
 
-// The command of a spawn through the helper: a shell as the agent user runs ONBOARD_JS, then
-// execs `bin` with `args` unchanged (the same process, so dtach still hosts Claude itself).
-export function onboardedLaunch(bin: string, args: string[]): { command: string; args: string[] } {
-  return { command: "/bin/sh", args: ["-c", 'node -e "$0" </dev/null >/dev/null 2>&1; exec "$@"', ONBOARD_JS, bin, ...args] };
+// The command of a spawn through the helper: a shell as the agent user runs ONBOARD_JS (with the
+// agent's own clone, or ""), then execs `bin` with `args` unchanged (the same process, so dtach
+// still hosts Claude itself).
+export function onboardedLaunch(bin: string, args: string[], clone?: string): { command: string; args: string[] } {
+  return { command: "/bin/sh", args: ["-c", 'node -e "$0" -- "$1" </dev/null >/dev/null 2>&1; shift; exec "$@"', ONBOARD_JS, clone ?? "", bin, ...args] };
 }
 
 // One change of a Claude config file, with the checks and the safe write described above.

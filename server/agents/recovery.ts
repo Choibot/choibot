@@ -209,7 +209,7 @@ export async function resumeAgent(
     { settingsPath, resume: canResume ? rec.sessionId! : undefined, cwd, prompt, promptSnapshotOff: chief },
   );
   const bin = runtime.bin();
-  ctx.terminals.spawn({ id: rec.id, cwd, args, command: bin, env, persist: true, helperLaunch: runtime.helperLaunch?.(bin, args) });
+  ctx.terminals.spawn({ id: rec.id, cwd, args, command: bin, env, persist: true, helperLaunch: runtime.helperLaunch?.(bin, args, rec) });
   // Comes up idle, waiting for input; UserPromptSubmit flips it to running.
   // chiefRev rides in the same write: set when launched with the identity env,
   // cleared (undefined is dropped by JSON) when launched without it.

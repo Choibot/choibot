@@ -100,7 +100,7 @@ import { Coalescer } from "./issues/coalesce.js";
 import { handleReply, typeIntoAgent, withTypingLock } from "./issues/reply.js";
 import { ComposerGate, registerComposerApi } from "./agents/composer.js";
 import { PromptWatcher } from "./agents/prompt-watch.js";
-import { registerPromptApi } from "./agents/prompt-api.js";
+import { livePromptKind, registerPromptApi } from "./agents/prompt-api.js";
 import { makeDispatcher } from "./issues/dispatch.js";
 import { guessRepo } from "./issues/guess.js";
 import { ActedLog } from "./master/acted.js";
@@ -521,10 +521,11 @@ async function main() {
   });
   // The prompt card (agents/prompt-api.ts): an agent's terminal dialog as
   // data, and the allow-listed keys that answer it.
-  registerPromptApi(app, {
+  const promptApi = {
     terminals, prompts: promptWatcher, onTyped: onWebInput,
-    agentExists: async (id) => (await store.load(id)) !== null,
-  });
+    agentExists: async (id: string) => (await store.load(id)) !== null,
+  };
+  registerPromptApi(app, promptApi);
   // The composer under each agent terminal (spec 2026-11-05-agent-composer).
   // Its typed text counts as web input for the fleet master's inbox.
   const composerGate = new ComposerGate({
@@ -751,6 +752,9 @@ async function main() {
     repos: async () => (await pushRepos(process.env)).names.map((name) => ({ name, path: join(issuesWorkspace, name) })),
     spawn: (req) => spawnAgent(spawnDeps, req),
     tickets: async () => (chief ? chief.queue.list() : []),
+    // The first agent's dialog, as its prompt card reads it (the set-up card shows that card).
+    // Only while its terminal is live here: a poll of the set-up page never reattaches it.
+    dialog: (id) => livePromptKind(promptApi, id),
     changed: () => setupSteps.forget(),
   });
   // Strong protection: the agents commit under their own account, with the user's commit name.

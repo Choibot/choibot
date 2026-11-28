@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
-import { KEY_GAP_MS, MAX_KEYS, readPrompt, readScreen, registerPromptApi, sendKeys, type PromptApiDeps } from "./prompt-api.js";
+import { KEY_GAP_MS, livePromptKind, MAX_KEYS, readPrompt, readScreen, registerPromptApi, sendKeys, type PromptApiDeps } from "./prompt-api.js";
 import { PromptWatcher } from "./prompt-watch.js";
 import { TerminalManager } from "./terminal.js";
 import { typeIntoAgent, withTypingLock } from "../issues/reply.js";
@@ -193,6 +193,20 @@ describe("readPrompt and readScreen", () => {
     const { d } = setup({ terms });
     expect((await readPrompt(d, "a1")).body).toEqual({ live: true, prompt: null });
     expect(terms.log).toEqual(["reattach a1"]);
+  });
+
+  // The set-up page polls the first agent's dialog every few seconds (server/setup/firstagent.ts).
+  it("livePromptKind: the kind on a live terminal; a terminal that is not live gives none and is never reattached", async () => {
+    expect(await livePromptKind(setup({ screen: TRUST }).d, "a1")).toBe("folder-trust");
+    watcher?.dispose();
+    expect(await livePromptKind(setup({ screen: "hello" }).d, "a1")).toBeNull();
+    watcher?.dispose();
+    const terms = fakeTerms({ live: [], session: ["a1"] });
+    const { d } = setup({ terms });
+    expect(await livePromptKind(d, "a1")).toBeNull();
+    expect(await livePromptKind(d, "svc:x")).toBeNull();
+    expect(terms.log).toEqual([]);
+    expect(terms.live.has("a1")).toBe(false);
   });
 
   it("the screen as text lines", async () => {

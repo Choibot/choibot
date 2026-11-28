@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { claudeHooksPath, claudeRuntime, claudeTranscriptPath, ensureTranscriptAt } from "./claude.js";
+import { onboardedLaunch } from "./claude-trust.js";
 import { setAgentHelper } from "../../chief/hardened.js";
 import { setTranscriptReaders } from "../sessionread.js";
 import type { AccountPaths } from "../accounts.js";
@@ -141,6 +142,21 @@ describe("hardened Claude dirs (ruling F1)", () => {
     await writeFile(join(p.defaultDir, "settings.json"), "{}");
     return p;
   }
+
+  // The launch of a spawn through the helper names the folder whose trust key the agent writes
+  // (claude-trust.ts ONBOARD_JS): only the agent's own clone, AGENT_HOME_ROOT/clones/<its id>, from
+  // the id and the console's setting, never from a path of the record.
+  it("helperLaunch: an agent with its own clone names AGENT_HOME_ROOT/clones/<id>; any other agent names no folder", () => {
+    hardened();
+    vi.stubEnv("AGENT_HOME_ROOT", "/srv/choibot/agent-homes");
+    const r = (over: Partial<AgentRecord>) => ({ id: "a1", repo: "/ws/app", worktree: "/elsewhere", cwd: "/elsewhere", ...over }) as AgentRecord;
+    expect(claudeRuntime.helperLaunch!("/bin/claude", ["--x"], r({ clone: true }))).toEqual(onboardedLaunch("/bin/claude", ["--x"], "/srv/choibot/agent-homes/clones/a1"));
+    for (const other of [r({}), r({ kind: "lead", repo: "" })]) {
+      expect(claudeRuntime.helperLaunch!("/bin/claude", ["--x"], other)).toEqual(onboardedLaunch("/bin/claude", ["--x"]));
+    }
+    vi.stubEnv("AGENT_HOME_ROOT", "");
+    expect(claudeRuntime.helperLaunch!("/bin/claude", ["--x"], r({ clone: true }))).toEqual(onboardedLaunch("/bin/claude", ["--x"]));
+  });
 
   it("the agent env's CLAUDE_CONFIG_DIR is AGENT_CLAUDE_CONFIG_DIR, also for a named account (never synced, one log line)", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});

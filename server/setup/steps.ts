@@ -261,7 +261,7 @@ export const STEPS: Step[] = [
   {
     id: "merge",
     title: "Merge the first PR",
-    why: "You read the ticket in the Queue and merge. Then the set-up is done.",
+    why: "Read what your agent did, then merge it here. Then the set-up is done.",
     needs: ["agent"],
     on: "console",
     completes: { kind: "action", name: "merge", built: true },

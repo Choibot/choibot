@@ -19,6 +19,8 @@ import { QueueActions } from "./actions.js";
 import { registerQueueApi } from "./api.js";
 import { AutoAnswer } from "./auto.js";
 import { isMergedNotice } from "./lines.js";
+import { consoleProbes } from "../../setup/probes.js";
+import { FirstAgent, otherOpen, ticketState } from "../../setup/firstagent.js";
 import { checksAsk, mergeBlock, QueueMerge } from "./merge.js";
 import { prMergeState } from "./prgate.js";
 import type { NewItem } from "./store.js";
@@ -196,6 +198,37 @@ describe("POST /api/queue/:id/merge: the user merges from the ticket", () => {
     expect(await lines(h)).toEqual([]);
     expect(h.kicks).toEqual([]);
     expect(prChanges).toBe(0);
+  });
+
+  // The set-up card's Merge (components/setup/FirstPrStep.tsx) is this button and this route: the
+  // ticket ends as a merge in the Queue ends it, and the set-up's step "Merge the first PR" passes.
+  it("a merge from the set-up card: the ticket leaves the Queue closed as merged, and the set-up step reads it", async () => {
+    const id = await addPr();
+    // The set-up's probes read the list once per check, so each check makes its own.
+    const mergedCount = () => consoleProbes({ env: {}, agents: { list: async () => [], exists: async () => true },
+      chief: { problem: null, devices: { list: async () => [] }, queue: h.store }, bot: async () => ({ ok: false }) } as never).merged();
+    expect(await mergedCount()).toEqual({ count: 0 });
+    const r = await post(`/api/queue/${id}/merge`, userHdr, { head: HEAD, method: "squash" });
+    expect(r.statusCode).toBe(200);
+    const closed = await item(id);
+    expect(closed).toMatchObject({ status: "withdrawn", lastError: "merged" });
+    expect(ticketState(closed)).toBe("merged");
+    // No stale ticket: the Queue's list has it no more, and the card offers it no more.
+    const live = (await get("/api/queue", userHdr)).json() as { items: QueueItem[] };
+    expect(live.items.map((i) => i.id)).not.toContain(id);
+    expect(otherOpen(await h.store.list(), null)).toBeNull();
+    expect(await mergedCount()).toEqual({ count: 1 });
+    // The view of the first agent (here: the ticket's own agent) says merged.
+    const first = new FirstAgent({
+      file: join(root, "setup", "first-agent.json"), agents: { load: async (a) => RECORDS[a] ?? null }, repos: async () => [{ name: "app-shop", path: "/ws/app-shop" }],
+      spawn: async () => ({ ok: true, id: "a1" }), tickets: () => h.store.list(), changed: () => {}, now: () => NOW, log: () => {},
+    });
+    expect(await first.start()).toMatchObject({ ok: true });
+    expect((await first.view()).ticket).toEqual({ id, state: "merged" });
+    // A second press (a stale card in another tab) merges nothing.
+    const again = await post(`/api/queue/${id}/merge`, userHdr, { head: HEAD, method: "squash" });
+    expect(again.statusCode).not.toBe(200);
+    expect(merges).toHaveLength(1);
   });
 
   it("GitHub shows the merge a moment late: one retry closes the ticket", async () => {

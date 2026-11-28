@@ -10,10 +10,12 @@
 "use client";
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { fetchFirst, firstSay, startFirst, type FirstView } from "../../lib/setupActions";
+import { AFTER_KEYS_MS, usePrompt } from "../../lib/usePrompt";
 import { firstStart, rememberFirst, warmTicket } from "../../lib/setupMemory";
 import { bandAt, milestones, nowLine, threadNow } from "../../lib/stage";
 import { fetchThread } from "../../lib/thread";
 import { cx as k, Dot } from "../settings/kit";
+import { PromptCard } from "../PromptCard";
 import { CheckIcon } from "../SideIcons";
 import { Fold, MoreToggle, Pending } from "./Fold";
 import c from "./Setup.module.css";
@@ -71,8 +73,11 @@ function Marks({ view }: { view: FirstView }) {
 
 // The state of the first agent in one card, and the buttons for what the user can do now:
 // start it, start a new one, or open its terminal (onOpenTerminal: the one way off the set-up
-// page, for a first agent with no session; never its thread). `repo`: the repo of the "Change" control for
-// the first start (a name of the list in the view; the server checks it against its own list).
+// page, for a first agent with no session and no known dialog; never its thread). A known dialog
+// of Claude (the view's `dialog`) shows here as the agent pane's own card (PromptCard, usePrompt):
+// the same read and the same keys route (POST /api/agents/:id/keys), no other way to type.
+// `repo`: the repo of the "Change" control for the first start (a name of the list in the view;
+// the server checks it against its own list).
 // `stage`: the signs of life (`now`: the open step of its thread), and `more` in a closed fold
 // whose switch is at the right of the buttons.
 export function AgentState({ view, set, onChange, onOpenTerminal, repo, stage, more }: {
@@ -88,6 +93,16 @@ export function AgentState({ view, set, onChange, onOpenTerminal, repo, stage, m
   };
   const say = firstSay(repo && !view.agent ? { ...view, repo } : view);
   const agent = view.agent;
+  const dialog = agent?.dialog ?? null;
+  const ask = usePrompt(agent?.id ?? "", dialog !== null);
+  // This page has no event stream: each new view that still names a dialog reads the card again.
+  const askRefresh = ask.refresh;
+  useEffect(() => { if (dialog) askRefresh(); }, [dialog, view.now, askRefresh]);
+  const card = dialog && ask.prompt && ask.prompt.kind !== "unknown" ? ask.prompt : null;
+  const answer = (keys: Parameters<typeof ask.press>[0], rev?: string) => void ask.press(keys, rev).then((o) => {
+    // The answer is on the screen soon after: the view says so (the line, the scene).
+    if (o.kind === "sent") setTimeout(() => void fetchFirst().then(set, () => {}), AFTER_KEYS_MS);
+  });
   const now = stage ? nowLine(stage.now) : null;
   const band = stage ? bandAt(view) : null;
   // The marks while all goes well; a stop or an error shows the words of firstSay only.
@@ -109,6 +124,7 @@ export function AgentState({ view, set, onChange, onOpenTerminal, repo, stage, m
       ) : (
         <p className={say.tone === "warn" ? c.error : c.today}>{say.line}</p>
       )}
+      {agent && card && <PromptCard prompt={card} who={agent.name} busy={ask.busy} note={ask.note} onPress={answer} />}
       {err && <p className={c.error} role="alert">{err}</p>}
       {(say.acts.length > 0 || more) && (
         <div className={c.acts}>

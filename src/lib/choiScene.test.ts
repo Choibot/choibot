@@ -92,6 +92,9 @@ describe("agentPhase: the first agent, in the words of its card", () => {
     expect(agentPhase(first({ noSession: true }))).toBe("stop");
     expect(agentPhase(first({ state: "waiting", noSession: true }))).toBe("stop");
     expect(agentPhase(first({ noSession: false }))).toBe("work");
+    // a dialog of Claude on its card ("Waiting for you"): the same calm sign
+    expect(agentPhase(first({ dialog: "folder-trust" }))).toBe("stop");
+    expect(agentPhase(first({ state: "waiting", dialog: "folder-trust" }))).toBe("stop");
     for (const state of ["waiting", "ended", "closed", "gone"] as const) expect(agentPhase(first({ state }))).toBe("stop");
     expect(agentPhase(first({ state: "waiting", pullRequest: true }))).toBe("stop");
     expect(agentPhase(first({ state: "waiting", pullRequest: true }, { id: "q1", state: "open" }))).toBe("pr");

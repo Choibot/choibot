@@ -249,7 +249,6 @@ export default function Page() {
     onNewAgent: () => setLauncherOpen(true),
     // The agent with no session file: its pane shows the terminal (lib/thread shownMode).
     onOpenTerminal: (id) => { setTab("agents"); selectAgent(id); },
-    ...(queueShown ? { onOpenQueue: () => { setTab("agents"); openQueue(); } } : {}),
     onLeave: leaveSetup,
   };
   // A workspace (no-repo) agent runs at the workspace root: no branch/base, and

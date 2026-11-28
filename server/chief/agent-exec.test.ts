@@ -1058,6 +1058,8 @@ describe("choibot-agent-exec: repo-clone, repo-remove, read-file", () => {
     const fakeClaude = script("fake-claude", [
       "#!/bin/sh",
       '[ -t 0 ] && t=tty || t=notty',
+      // The config as Claude would read it at its start.
+      `cp "$CLAUDE_CONFIG_DIR/.claude.json" '${seen}.config'`,
       `{ printf '%s\\0' "$t" "$CLAUDE_CONFIG_DIR" "$@"; } > '${seen}.tmp' && mv '${seen}.tmp' '${seen}'`,
       "exec sleep 300",
       "",
@@ -1096,16 +1098,21 @@ describe("choibot-agent-exec: repo-clone, repo-remove, read-file", () => {
       expect(spawned.map((o) => [o.cwd, o.env?.CLAUDE_CONFIG_DIR])).toEqual([[dest, `${home}/.claude`]]);
       const [o] = spawned;
       expect(o.command).toBe(fakeClaude);
-      expect(o.helperLaunch).toEqual(onboardedLaunch(fakeClaude, o.args));
+      expect(o.helperLaunch).toEqual(onboardedLaunch(fakeClaude, o.args, dest));
 
       // The helper's spawn verb, as terminal.ts calls it (helperSpawnCommand, helperEnv).
       const s = sock(`choibot-${r.id}.sock`);
       ptyRun(["spawn", s, dest, "--", o.helperLaunch!.command, ...o.helperLaunch!.args], helperEnv(o.env ?? {}));
       await waitFor(() => existsSync(seen), 10_000);
       expect(readFileSync(seen, "utf8").split("\0").slice(0, -1)).toEqual(["tty", `${home}/.claude`, ...o.args]);
-      const cfg = JSON.parse(readFileSync(join(home, ".claude", ".claude.json"), "utf8"));
+      // The Claude folder had no .claude.json before repo-clone. At Claude's start: the first-run
+      // mark, the helper's trust of the clones' folder, and the trust of the clone itself (a git
+      // repo root: Claude 2.1.332 counts no trusted parent above it).
+      const cfg = JSON.parse(readFileSync(`${seen}.config`, "utf8"));
       expect(cfg.hasCompletedOnboarding).toBe(true);
       expect(cfg.projects[realpathSync(clones)].hasTrustDialogAccepted).toBe(true);
+      expect(cfg.projects[realpathSync(dest)].hasTrustDialogAccepted).toBe(true);
+      expect(Object.keys(cfg.projects)).toEqual([realpathSync(clones), realpathSync(dest)]);
       // No shell stays between dtach and the program: the launch execs it.
       const programs = (): string[] => {
         const m = masterOf(s);

@@ -108,6 +108,8 @@ describe("the signs of life of the first agent", () => {
     expect(bandAt(view({ agent: { state: "error" } }))).toBeNull();
     // no session yet: the task did not start, so no time of the task
     expect(bandAt(view({ now: 2 * 60_000, agent: { noSession: true } }))).toBeNull();
+    // a dialog of Claude waits for the user: no time of the task either
+    expect(bandAt(view({ now: 2 * 60_000, agent: { dialog: "folder-trust" } }))).toBeNull();
     expect(bandAt(view({ ticket: { id: "q1", state: "open" } as FirstView["ticket"] }))).toBeNull();
     expect(bandAt(view({ agent: null }))).toBeNull();
     expect(bandAt(null)).toBeNull();

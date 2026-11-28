@@ -10,17 +10,19 @@
 //
 // A console that nobody opens a terminal on (a hosted one) has a second key: the claim link of
 // its first-start file (claimlink.ts). Both keys open the same lock, and the first device that
-// pairs (with either key) ends the claim link.
+// pairs (with either key) ends the claim link. While no device is paired, the door (the front
+// proxy of a hosted console) can put a new link in place of the old one (RELINK_ROUTE).
 //
 // An install with the old names, a console that pairs through Telegram and a console with the
 // Queue off never get any of this: firstRunOn is false, and index.ts registers nothing.
 import { createHash, randomInt, timingSafeEqual } from "node:crypto";
 import { rm } from "node:fs/promises";
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type { FastifyError, FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import { doorProofOk, listenerKind } from "../frontproxy.js";
 import { names } from "../names.mjs";
 import { VERSION_ROUTE } from "../release.js";
 import { AGENT_HEADER, AGENT_TOKEN_HEADER, DEVICE_LABEL_RE, type Caller, type DeviceStore } from "./auth.js";
-import type { ClaimLinks } from "./claimlink.js";
+import { parseRelink, type ClaimLinks } from "./claimlink.js";
 import { atomicWrite, onChain, readJson } from "./files.js";
 import { CHIEF_ERR } from "./gate.js";
 
@@ -119,7 +121,47 @@ export const FIRST_RUN_PAGE = "/first-run";
 export const FIRST_RUN_ERR = {
   wrong: "wrong-code", spent: "too-many-tries", gone: "pairing code expired or used", agentHeaders: "agent headers are not allowed",
   wrongLink: "wrong-link", spentLink: "too-many-tries", goneLink: "link expired or used",
+  doorOnly: "door-only", badRelink: "bad-relink", claimed: "claimed",
 } as const;
+
+// The door's new claim link (claimlink.ts relink). Only the front proxy's private listener takes
+// it: there the proxy gate (frontproxy.ts installProxyGate) checked the door's token in constant
+// time before any hook. But the door adds that token to EVERY request that it proxies, also a
+// browser's: so the token alone does not tell the door's own call. The door's control path
+// proves its call: DOOR_PROOF_HEADER holds frontproxy.ts doorProof (an HMAC with the door's token
+// as the key) of RELINK_PROOF, and a browser never knows the token. That is the wall, whatever
+// door is in front. The second layer: the door sets DOOR_OP_HEADER, removes it and the proof
+// from every request that it proxies for a browser, and refuses this path for a browser; and a
+// request that a browser made carries one of BROWSER_HEADERS (a browser cannot leave out Origin
+// on a POST, nor the Sec-Fetch headers), so it is refused here too.
+export const RELINK_ROUTE = "/api/chief/pair/relink";
+export const DOOR_OP_HEADER = "x-console-door-op";
+export const DOOR_PROOF_HEADER = "x-console-door-proof";
+// The text that the door's proof signs: one for the read, and for a new link its hash and end
+// time, so a proof is good for that one link only. The door signs the same texts.
+export const RELINK_PROOF = {
+  read: "console-door relink-read v1",
+  make: (b: { sha256: string; expiresAt: number }): string => `console-door relink v1\n${b.sha256}\n${b.expiresAt}`,
+} as const;
+export const BROWSER_HEADERS: readonly string[] = ["origin", "referer", "cookie", "sec-fetch-site", "sec-fetch-mode", "sec-fetch-dest", "sec-fetch-user"];
+const fromDoorOp = (h: FastifyRequest["headers"]): boolean =>
+  h[DOOR_OP_HEADER] === "relink" && !BROWSER_HEADERS.some((k) => Object.hasOwn(h, k));
+// The text that the proof of a new link signs, from what the request carries, with nothing that
+// can throw: a body with no such fields gives a text that the door never signs.
+const signedOf = (raw: unknown): { sha256: string; expiresAt: number } => {
+  const o = raw !== null && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  return {
+    sha256: Object.hasOwn(o, "sha256") && typeof o.sha256 === "string" ? o.sha256 : "",
+    expiresAt: Object.hasOwn(o, "expiresAt") && typeof o.expiresAt === "number" ? o.expiresAt : Number.NaN,
+  };
+};
+// A body that Fastify could not read (broken JSON, an empty body, another content type, too
+// large) has no right proof: the same 403 as any request with none. Any other error goes on to
+// the app's error handler.
+const unreadBody = (err: FastifyError, _req: FastifyRequest, reply: FastifyReply): void => {
+  if (typeof err.code !== "string" || !err.code.startsWith("FST_ERR_CTP_")) throw err;
+  void reply.code(403).send({ error: FIRST_RUN_ERR.doorOnly });
+};
 // The label of the first device when the browser gives none that is valid.
 export const FIRST_DEVICE_LABEL = "first-device";
 
@@ -132,7 +174,13 @@ export type FirstRunDeps = {
   devices: Pick<DeviceStore, "list" | "add">;
   codes: Pick<BoxCodes, "claim">;
   // The claim link of the first-start file (claimlink.ts).
-  links: Pick<ClaimLinks, "view" | "claim" | "end" | "mayBeOpen">;
+  links: Pick<ClaimLinks, "view" | "claim" | "end" | "mayBeOpen" | "relink" | "claimedOnce">;
+  // The request came in on the front proxy's private listener, with the door's token (frontproxy.ts
+  // listenerKind). A test gives its own.
+  fromProxy?: (req: FastifyRequest) => boolean;
+  // The door's proof of RELINK_ROUTE for this text (frontproxy.ts doorProofOk). A test gives its own.
+  doorProof?: (req: FastifyRequest, message: string) => boolean;
+  now?: () => number;
   // Who calls (the gate's caller check): an agent of this console passes the lock.
   caller: (req: FastifyRequest) => Promise<Caller>;
   // The route pattern of the catch-all that serves the pages of the app (index.ts).
@@ -145,6 +193,9 @@ export function registerFirstRun(app: FastifyInstance, d: FirstRunDeps): { locke
   // memory and reads the file again only when one stat shows that it changed. So a revoke of
   // the last device locks the console at the next request.
   const locked = async (): Promise<boolean> => (await d.devices.list()).length === 0;
+  const fromProxy = d.fromProxy ?? ((req: FastifyRequest) => listenerKind(req) === "proxy");
+  const doorProof = d.doorProof ?? ((req: FastifyRequest, message: string) => doorProofOk(req.raw, message, req.headers[DOOR_PROOF_HEADER]));
+  const now = d.now ?? Date.now;
 
   // A device is paired: a claim link that is still open ends (once; then this costs nothing). So
   // a console that is locked again later (its last device revoked) never takes an old link.
@@ -158,7 +209,7 @@ export function registerFirstRun(app: FastifyInstance, d: FirstRunDeps): { locke
   app.addHook("onRequest", async (req: FastifyRequest, reply: FastifyReply) => {
     if (!(await settle())) return undefined;
     const route = req.routeOptions.url;
-    if (route === FIRST_RUN_ROUTE || route === AGENT_HOOK_ROUTE) return undefined;
+    if (route === FIRST_RUN_ROUTE || route === AGENT_HOOK_ROUTE || route === RELINK_ROUTE) return undefined;
     // Which version runs (no secret): the updater's check after a start, before any claim.
     if (route === VERSION_ROUTE && (req.method === "GET" || req.method === "HEAD")) return undefined;
     const socket = (req.headers.upgrade ?? "").toLowerCase() === "websocket";
@@ -208,6 +259,41 @@ export function registerFirstRun(app: FastifyInstance, d: FirstRunDeps): { locke
     // The first device is in: the other key ends too.
     await d.links.end();
     return reply.code(200).send({ token, label });
+  });
+
+  // Who may use RELINK_ROUTE, in this order: the listener (any other: as if no such route),
+  // agent headers, a request that a browser made or that has no door op. A hook of the route, so
+  // it comes before the body is read: on another listener a body or a content type that the
+  // route would refuse gets the same 404 (an agent does not learn that the route is there).
+  const doorOnly = async (req: FastifyRequest, reply: FastifyReply): Promise<FastifyReply | undefined> => {
+    if (!fromProxy(req)) return reply.code(404).send({ error: "not found" });
+    if (Object.hasOwn(req.headers, AGENT_HEADER) || Object.hasOwn(req.headers, AGENT_TOKEN_HEADER)) {
+      return reply.code(403).send({ error: FIRST_RUN_ERR.agentHeaders });
+    }
+    if (!fromDoorOp(req.headers)) return reply.code(403).send({ error: FIRST_RUN_ERR.doorOnly });
+    return undefined;
+  };
+
+  // The door's read before it offers "Make a new link": {claimed}. True when a device is paired
+  // now or was paired once (then a new link is refused for ever). A console of before this route
+  // refuses the read (no route), and the door keeps the words of before with no button.
+  app.get(RELINK_ROUTE, { onRequest: doorOnly }, async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!doorProof(req, RELINK_PROOF.read)) return reply.code(403).send({ error: FIRST_RUN_ERR.doorOnly });
+    const claimed = !(await settle()) || (await d.links.claimedOnce());
+    return reply.code(200).send({ claimed });
+  });
+
+  // The door's new link: {sha256, expiresAt}. The answers hold no hash. In this order: the door
+  // checks above, the door's proof of this hash and end time, the shape, then a paired device
+  // (now or once). The proof comes before the shape: a request with no right proof gets the same
+  // 403 whatever its body, also a body that cannot be read (errorHandler).
+  app.post(RELINK_ROUTE, { onRequest: doorOnly, errorHandler: unreadBody }, async (req: FastifyRequest, reply: FastifyReply) => {
+    if (!doorProof(req, RELINK_PROOF.make(signedOf(req.body)))) return reply.code(403).send({ error: FIRST_RUN_ERR.doorOnly });
+    const body = parseRelink(req.body, now());
+    if ("refused" in body) return reply.code(400).send({ error: FIRST_RUN_ERR.badRelink, field: body.refused });
+    if (!(await settle())) return reply.code(409).send({ error: FIRST_RUN_ERR.claimed });
+    if ((await d.links.relink(body)) === "claimed") return reply.code(409).send({ error: FIRST_RUN_ERR.claimed });
+    return reply.code(200).send({ ok: true, expiresAt: body.expiresAt });
   });
 
   return { locked };

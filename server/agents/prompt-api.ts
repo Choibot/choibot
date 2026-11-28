@@ -12,7 +12,7 @@
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 import { withTypingLock, type ReplyTerminals } from "../issues/reply.js";
 import { isAgentId } from "../ids.js";
-import { isPromptKey, promptKeySeq, type PromptKey } from "./prompt.js";
+import { isPromptKey, promptKeySeq, type PromptKey, type PromptKind } from "./prompt.js";
 import type { PromptState, PromptSummary } from "./prompt-watch.js";
 import type { Screen } from "./screen.js";
 
@@ -68,6 +68,14 @@ export async function readPrompt(d: PromptApiDeps, id: string): Promise<PromptRe
   if (!isAgentId(id) || !(await d.agentExists(id))) return { code: 404, body: { reason: "agent-gone" } };
   if (!(await ensureAttached(d.terminals, id))) return { code: 200, body: { live: false, prompt: null } };
   return { code: 200, body: { live: true, prompt: await d.prompts.state(id) } };
+}
+
+// The kind of dialog on the screen of an agent whose terminal is live here, for a poll (the
+// set-up page's first agent, every few seconds): never a reattach. A terminal that is not live
+// gives no dialog; the card's own read (readPrompt) attaches it when the user opens it.
+export async function livePromptKind(d: Pick<PromptApiDeps, "terminals" | "prompts">, id: string): Promise<PromptKind | null> {
+  if (!isAgentId(id) || !d.terminals.has(id)) return null;
+  return (await d.prompts.state(id))?.kind ?? null;
 }
 
 export async function readScreen(d: PromptApiDeps, id: string): Promise<ScreenResult> {

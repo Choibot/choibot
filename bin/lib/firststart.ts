@@ -14,7 +14,8 @@
 // The image clean-up (the recipe) removes the rest: the machine id, the SSH host keys, logins.
 //
 // It refuses a console that has a paired device (that is not a first start: a new secret would
-// sign the person out), an install with the old names, a console that does not pair from the
+// sign the person out), a console where a device was paired once (its claim state says "used":
+// it is kept, so no new claim link opens that console again), an install with the old names, a console that does not pair from the
 // server, and a file that the console would refuse. It prints nothing of the hash.
 import { spawnSync } from "node:child_process";
 import { X509Certificate } from "node:crypto";
@@ -23,7 +24,7 @@ import { dirname, join, resolve } from "node:path";
 import { PROXY_ENV, parseProxySettings, type ProxySettings } from "../../server/frontproxy.js";
 import { DISPLAY_NAME } from "../../server/brand.js";
 import { DeviceStore } from "../../server/chief/auth.js";
-import { parseFirstStart } from "../../server/chief/claimlink.js";
+import { claimUsed, parseFirstStart } from "../../server/chief/claimlink.js";
 import { atomicWrite } from "../../server/chief/files.js";
 import { firstRunOn } from "../../server/chief/firstrun.js";
 import { chiefActive, chiefPaths, chiefUserAuth, resolveChiefDataDir, type Env } from "../../server/chief/paths.js";
@@ -83,6 +84,10 @@ export async function runFirstStart(d: FirstStartDeps): Promise<number> {
   const paths = chiefPaths(chiefDir);
   if ((await new DeviceStore(paths.devices).list()).length > 0) {
     err(`✖ This ${DISPLAY_NAME} has a paired device: this is not its first start. Nothing is changed.`);
+    return 1;
+  }
+  if (await claimUsed(paths.claimLink)) {
+    err(`✖ A device was paired on this ${DISPLAY_NAME} once: this is not its first start. Nothing is changed.`);
     return 1;
   }
 

@@ -4,6 +4,7 @@
 // reason. The copy runs on the server: a page that closes and comes back sees how far it is.
 "use client";
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { awayFrom, chooseCard, installUrl, moveTrip, onReturn, tripMoved, tripWaits } from "../../lib/githubTrip";
 import {
   accessWord, canPick, cloneLine, cloneProblem, fetchClone, fetchRepoPage, repoChoice, repoLine, startClone,
   type CloneState, type PickRow, type RepoPage,
@@ -17,6 +18,37 @@ const POLL_MS = 1000;
 const TYPE_MS = 250;
 
 type List = { q: string; rows: PickRow[]; page: number; last: RepoPage };
+
+// The ChoiBot app reaches no repo yet: the one action of this step is to choose them on GitHub
+// (chooseCard has the words). `moved`: the tab of the one trip went on to the install page.
+export function ChooseCard({ appUrl, moved, emptyReads, reading, listErr, onRead }: {
+  appUrl: string | null; moved: boolean; emptyReads: number; reading: boolean; listErr: string; onRead: () => void;
+}) {
+  const card = chooseCard(appUrl, moved);
+  return (
+    <>
+      {listErr && <p className={c.error} role="alert">{listErr}</p>}
+      <div className={c.card} data-part="choose">
+        {card.link
+          ? (
+            <div className={c.acts}>
+              <a className={`${k.btn} ${card.link.primary ? k.primary : k.quiet}`} href={card.link.href} target="_blank" rel="noopener noreferrer">{card.link.text}<ExternalIcon /></a>
+              <span className={c.quiet}>{card.line}</span>
+            </div>
+          )
+          : <p className={c.quiet}>{card.line}</p>}
+        {emptyReads > 0 && (
+          <p className={c.today} role="status">ChoiBot still reaches no repo. On GitHub, check that you picked your repos and pressed Install or Save.</p>
+        )}
+        <div className={c.acts}>
+          <button type="button" className={`${k.btn} ${k.quiet}`} disabled={reading} onClick={onRead}>
+            {reading ? "Reading…" : "Read the list again"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
 
 export function RepoStep({ onDone }: { onDone: () => Promise<void> }) {
   const [q, setQ] = useState("");
@@ -63,9 +95,11 @@ export function RepoStep({ onDone }: { onDone: () => Promise<void> }) {
     return () => { live = false; };
   }, []);
   // The ChoiBot app reaches no repo yet: the person chooses its repos on GitHub in another tab.
-  // When this page gets the focus back, the list is read again ("Read the list again" does the
-  // same). `emptyReads`: the reads that still gave no repo, after the first one.
+  // When this page shows again, the list is read again ("Read the list again" does the same).
+  // `emptyReads`: the reads that still gave no repo, after the first one.
   const waitsForRepos = repoChoice(list?.last ?? null) === "choose";
+  const appUrl = list?.last.app?.appUrl ?? null;
+  const [moved, setMoved] = useState(tripMoved);
   const [emptyReads, setEmptyReads] = useState(0);
   const lastRead = useRef(list);
   useEffect(() => {
@@ -77,11 +111,14 @@ export function RepoStep({ onDone }: { onDone: () => Promise<void> }) {
   }, [list, waitsForRepos]);
   useEffect(() => {
     if (!waitsForRepos) return;
-    const again = () => { if (document.visibilityState === "visible") void read(q.trim(), 0, { fresh: true }); };
-    window.addEventListener("focus", again);
-    document.addEventListener("visibilitychange", again);
-    return () => { window.removeEventListener("focus", again); document.removeEventListener("visibilitychange", again); };
+    return onReturn(() => { void read(q.trim(), 0, { fresh: true }); });
   }, [waitsForRepos, read, q]);
+  // The one trip: the person approved in the GitHub tab of press 1 and is still there. That tab
+  // goes on to the app's install page (once). A person who looks at this tab presses the link.
+  useEffect(() => {
+    if (!waitsForRepos || !appUrl || !tripWaits() || !awayFrom()) return;
+    void moveTrip(installUrl(appUrl)).then((ok) => { if (ok) setMoved(true); });
+  }, [waitsForRepos, appUrl]);
 
   const copying = clone.state === "copying";
   useEffect(() => {
@@ -107,32 +144,8 @@ export function RepoStep({ onDone }: { onDone: () => Promise<void> }) {
   }
   if (clone.state === "done") return <p className={c.today}>{clone.repo} is on your server. The check runs now.</p>;
 
-  // The ChoiBot app reaches no repo yet: the one action of this step is to choose them on GitHub.
   if (waitsForRepos && list?.last.app) {
-    const appUrl = list.last.app.appUrl;
-    return (
-      <>
-        {listErr && <p className={c.error} role="alert">{listErr}</p>}
-        <div className={c.card} data-part="choose">
-          {appUrl
-            ? (
-              <div className={c.acts}>
-                <a className={`${k.btn} ${k.primary}`} href={appUrl} target="_blank" rel="noopener noreferrer">Choose repos on GitHub<ExternalIcon /></a>
-                <span className={c.quiet}>On GitHub, pick “Only select repositories”, then your repos.</span>
-              </div>
-            )
-            : <p className={c.quiet}>The settings of your server have no link to the ChoiBot app yet. Ask the person who runs your server for it.</p>}
-          {emptyReads > 0 && (
-            <p className={c.today} role="status">ChoiBot still reaches no repo. On GitHub, check that you picked your repos and pressed Install or Save.</p>
-          )}
-          <div className={c.acts}>
-            <button type="button" className={`${k.btn} ${k.quiet}`} disabled={reading} onClick={() => void read(q.trim(), 0, { fresh: true })}>
-              {reading ? "Reading…" : "Read the list again"}
-            </button>
-          </div>
-        </div>
-      </>
-    );
+    return <ChooseCard appUrl={appUrl} moved={moved} emptyReads={emptyReads} reading={reading} listErr={listErr} onRead={() => void read(q.trim(), 0, { fresh: true })} />;
   }
 
   const rows = list?.rows ?? [];
@@ -196,6 +209,8 @@ export function RepoStep({ onDone }: { onDone: () => Promise<void> }) {
           </p>
         </>
       ) : (
+        // No ChoiBot app here: the login is `gh auth login` (server/setup/ghlogin.ts), whose app on
+        // GitHub is "GitHub CLI". With the app, this line never shows (the links above instead).
         <p className={c.quiet}>Is a repo of an organisation not in the list? An owner of the organisation must allow “GitHub CLI” first: <a href="https://github.com/settings/applications" target="_blank" rel="noopener noreferrer">github.com/settings/applications</a>.</p>
       )}
     </>

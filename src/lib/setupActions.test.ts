@@ -1,7 +1,7 @@
 // src/lib/setupActions.test.ts — the words of the GitHub and repo rows, and the calls.
 import { describe, expect, it } from "vitest";
 import {
-  accessWord, ago, appApproveLine, appReachLine, deviceLink, oneStepCard, repoChoice, canPick, cloneLine, cloneProblem, fetchLogin, fetchRepoPage, firstSay, loginProblem, mergeHint, minutesLeft, needsCommitName,
+  accessWord, ago, appApproveLine, appReachLine, deviceLink, oneStepCard, repoChoice, canPick, cloneLine, cloneProblem, fetchLogin, fetchRepoPage, firstSay, loginProblem, checksLine, minutesLeft, needsCommitName,
   repoLine, since, sizeText, SLOW_MS, startClone, startFirst, type FirstView, type PickRow,
 } from "./setupActions";
 
@@ -61,9 +61,9 @@ describe("the words", () => {
     expect(oneStepCard({ state: "idle" }, false).kind).toBe("starting");
     expect(oneStepCard(waiting, false)).toEqual({
       kind: "connect", code: "WDJB-MJHT", href: "https://github.com/login/device?user_code=WDJB-MJHT",
-      line: "ChoiBot gets access only to the repos that you pick next.", button: "Connect GitHub",
+      line: "On GitHub you approve, then pick your repos. ChoiBot gets access only to those.", button: "Connect GitHub",
     });
-    expect(oneStepCard(waiting, true)).toMatchObject({ kind: "approve", line: "Approve ChoiBot on GitHub. If it asks for the code, paste it.", button: "Open GitHub again" });
+    expect(oneStepCard(waiting, true)).toMatchObject({ kind: "approve", line: "Approve ChoiBot on GitHub, then pick your repos there. If it asks for the code, paste it.", button: "Open GitHub again" });
     expect(oneStepCard({ state: "done" }, true)).toEqual({ kind: "approved", line: "Approved on GitHub. One moment…" });
     // A refusal and a code that ran out: the plain line with what to press.
     expect(oneStepCard({ state: "failed", reason: "denied" }, true)).toEqual({ kind: "failed", line: loginProblem("denied") });
@@ -162,6 +162,17 @@ describe("the first agent, in plain words", () => {
     expect(firstSay(view({ agent: agent("error", { noSession: true }) })).line).toBe("The agent stopped with an error.");
   });
 
+  // The owner (hosted console, release 867): Claude's folder question hid in the agent list. Now
+  // the card shows the dialog with its answers: no other act, not even with no session.
+  it("says Waiting for you when a known dialog of Claude is on the agent's screen", () => {
+    const waits = { tone: "warn", line: "Waiting for you", acts: [] };
+    expect(firstSay(view({ agent: agent("working", { dialog: "folder-trust" }) }))).toEqual(waits);
+    expect(firstSay(view({ agent: agent("working", { dialog: "folder-trust", noSession: true }) }))).toEqual(waits);
+    expect(firstSay(view({ agent: agent("waiting", { dialog: "login-method" }) }))).toEqual(waits);
+    // no dialog and no session: its terminal, as before
+    expect(firstSay(view({ agent: agent("working", { noSession: true }) })).acts).toEqual(["terminal"]);
+  });
+
   it("says what happened and what to press when the agent stops with no pull request", () => {
     expect(firstSay(view({ agent: agent("waiting") }))).toMatchObject({ tone: "warn", line: "The agent stopped and opened no pull request.", acts: ["again"] });
     expect(firstSay(view({ agent: agent("waiting", { pullRequest: true }) }))).toMatchObject({ line: "The agent opened a pull request, but its ticket did not come.", acts: ["again"] });
@@ -200,14 +211,17 @@ describe("the first agent, in plain words", () => {
     expect([since(20_000), since(60_000), since(125_000), since(3_900_000), since(7_200_000)]).toEqual(["less than 1 minute", "1 minute", "2 minutes", "1 hour 5 minutes", "2 hours"]);
   });
 
-  it("says what stands in the way of a merge", () => {
+  it("says the checks in one short line; a conflict is the Queue's own line, not this one", () => {
     const pr = (o: object) => ({ pr: { url: "https://github.com/acme/shop/pull/1", number: 1, ...o } }) as never;
-    expect(mergeHint(pr({ mergeable: "CONFLICTING" }))).toMatch(/conflicts.*Open it on GitHub/);
-    expect(mergeHint(pr({ checks: "failure" }))).toMatch(/check of the pull request fails/);
-    for (const o of [{ mergeable: "CONFLICTING" }, { checks: "failure" }, { checks: "pending" }] as const) expect(mergeHint(pr(o))).not.toMatch(/thread/i);
-    expect(mergeHint(pr({ checks: "pending" }))).toMatch(/still run/);
-    expect(mergeHint(pr({ checks: "success", mergeable: "MERGEABLE" }))).toBeNull();
-    expect(mergeHint({ pr: { local: { repo: "shop", branch: "b" } } } as never)).toBeNull();
+    expect(checksLine(pr({ checks: "success" }))).toEqual({ text: "Checks pass.", tone: "good" });
+    expect(checksLine(pr({ checks: "failure" }))).toEqual({ text: "A check fails. Merge asks you first.", tone: "bad" });
+    expect(checksLine(pr({ checks: "pending" }))).toEqual({ text: "Checks still run. Merge asks you first.", tone: "warn" });
+    expect(checksLine(pr({ checks: "none" }))).toEqual({ text: "No checks." });
+    for (const o of [{ checks: "failure" }, { checks: "pending" }] as const) expect(checksLine(pr(o))!.text.split(". ").length).toBeLessThanOrEqual(2);
+    for (const o of [{ checks: "failure" }, { checks: "pending" }, { checks: "success" }] as const) expect(checksLine(pr(o))!.text).not.toMatch(/thread|queue/i);
+    expect(checksLine(pr({ checks: "failure", mergeable: "CONFLICTING" }))).toBeNull();
+    expect(checksLine(pr({}))).toBeNull();
+    expect(checksLine({ pr: { local: { repo: "shop", branch: "b" } } } as never)).toBeNull();
   });
 
   it("asks for a new agent only with `again`", async () => {

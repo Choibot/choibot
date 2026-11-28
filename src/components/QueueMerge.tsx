@@ -93,9 +93,11 @@ function stopEsc(e: KeyboardEvent): void {
 }
 
 type Phase = "idle" | "reading" | "confirm" | "merging" | "merged";
-type Props = { item: QueueItem; readOnly: boolean; userAuth: "telegram" | "log" | null; phone: boolean };
+// `methods`: false gives one Merge with no method menu (the set-up card): it merges with the
+// method this browser keeps for the repo, else squash, the same as the Queue's first press.
+type Props = { item: QueueItem; readOnly: boolean; userAuth: "telegram" | "log" | null; phone: boolean; methods?: boolean };
 
-export function MergeButton({ item: i, readOnly, userAuth, phone }: Props) {
+export function MergeButton({ item: i, readOnly, userAuth, phone, methods = true }: Props) {
   const hooks = useContext(MergeHooksContext);
   const pr = i.pr && "url" in i.pr ? i.pr : null;
   const slug = pr ? prSlug(pr.url) ?? i.repo : i.repo;
@@ -232,19 +234,21 @@ export function MergeButton({ item: i, readOnly, userAuth, phone }: Props) {
       ) : (
         <span className={s.split}>
           <button
-            ref={mergeRef} type="button" className={`${q.b} ${q.pri} ${s.main}`} disabled={disabled} title={title}
+            ref={mergeRef} type="button" className={`${q.b} ${q.pri}${methods ? ` ${s.main}` : ""}`} disabled={disabled} title={title}
             aria-label={`Merge PR #${pr.number}`} onClick={() => void begin()}
           >
             {phase === "reading" ? "Checking…" : phase === "merged" ? "Merged" : "Merge"}
             {!phone && phase === "idle" && !disabled && <kbd className={q.key}>m</kbd>}
           </button>
-          <button
-            type="button" className={`${q.b} ${q.pri} ${s.caret}`} disabled={disabled} aria-haspopup="menu" aria-expanded={menu}
-            aria-label={`Merge method: ${METHODS.find((m) => m.id === method)?.label}`} title="Merge method" onClick={() => setMenu((v) => !v)}
-          >
-            <ChevronIcon dir="down" size={10} />
-          </button>
-          {menu && (
+          {methods && (
+            <button
+              type="button" className={`${q.b} ${q.pri} ${s.caret}`} disabled={disabled} aria-haspopup="menu" aria-expanded={menu}
+              aria-label={`Merge method: ${METHODS.find((m) => m.id === method)?.label}`} title="Merge method" onClick={() => setMenu((v) => !v)}
+            >
+              <ChevronIcon dir="down" size={10} />
+            </button>
+          )}
+          {methods && menu && (
             <span className={s.menu} role="menu">
               {METHODS.map((m) => (
                 <button key={m.id} type="button" role="menuitemradio" aria-checked={m.id === method} className={s.item} onClick={() => pick(m.id)}>

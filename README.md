@@ -295,6 +295,29 @@ gets the Queue turned on, and a console that runs and is built gets no new build
 `pnpm choibot update` for new code). When a step fails, it prints the fix in plain words, and the
 next run goes on where it stopped.
 
+### Run it locally (development)
+
+For work on the console itself, without the systemd service. Needs Node ≥ 22 and pnpm
+(see [Requirements](#requirements)).
+
+```bash
+pnpm install
+pnpm server      # tsx watch server/index.ts: the API and the pages (Next in dev mode), restarts on change
+```
+
+The server does not read `.env` itself (the systemd unit loads it with `EnvironmentFile=`),
+so put the keys of [`.env.example`](.env.example) in your shell first. It refuses to start
+without a strong `CONSOLE_COOKIE_SECRET`, and listens on `PORT` (3000 when unset).
+
+Other scripts from `package.json`:
+
+| Command | What it does |
+| --- | --- |
+| `pnpm test` | The unit tests (`vitest run`). |
+| `pnpm typecheck` | `tsc --noEmit`. |
+| `pnpm build` | `next build`, the production build. |
+| `pnpm start` | The production server (`NODE_ENV=production tsx server/index.ts`). |
+
 ## Day-2 ops
 
 | Command | What it does |
